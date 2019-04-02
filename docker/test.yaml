@@ -1,0 +1,22 @@
+# docker network create --driver=bridge --subnet=172.21.0.0/16 --gateway=172.21.0.1 https-proxy
+# docker run -d --restart=always --name=https-proxy --network=https-proxy -v /var/run/docker.sock:/tmp/docker.sock:ro -p 80:80 -p 443:443 -e VIRTUAL_PROTO=https 990863991647.dkr.ecr.us-west-2.amazonaws.com/devops/https-proxy:v1.1.3
+# docker run -d --restart=always --name=dnsmasq --network=https-proxy --cap-add=NET_ADMIN -p 127.0.0.53:53:53/tcp -p 127.0.0.53:53:53/udp -p 127.0.0.1:53:53/tcp -p 127.0.0.1:53:53/udp -p 192.168.68.171:53:53/tcp -p 192.168.68.171:53:53/udp andyshinn/dnsmasq:2.78 --address=/mio/192.168.68.171 --server=192.168.68.207 --server=192.168.68.206
+version: "3.5"
+
+networks:
+  default:
+    driver: bridge
+  proxy:
+    external: true
+    name: https-proxy
+
+services:
+    beanstalkd:
+      image: schickling/beanstalkd
+      ports:
+        - 11300:11300
+
+    beanstalkd-aurora:
+      image: 990863991647.dkr.ecr.us-west-2.amazonaws.com/devops/beanstalkd-aurora:1.1
+      ports:
+        - 8080:8080

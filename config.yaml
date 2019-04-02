@@ -1,0 +1,37 @@
+brokers:
+  - scheduler: lottery
+    workerpool:
+      workertype: cmd
+      endpoint: 'php bin/console.php exec'
+      concurrent: 20
+    queues:
+      level1:
+        priority: 300
+        topics: 
+          - "a"
+          - "b"
+          - "c"
+      level2:
+        priority: 100
+        topics: 
+          - "x"
+          - "y"
+          - "z"      
+  - scheduler: lcsf
+    workerpool:
+      workertype: fastcgi
+      endpoint: "php bin/console.php exec"
+      concurrent: 20
+    queues:
+      level1:
+        priority: 300
+        topics: 
+          - a
+          - b
+          - c  
+      level2:
+        priority: 100
+        topics: 
+          - theRest
+          - "y"
+          - z
