@@ -1,28 +1,34 @@
 package schedule
 
 import (
+	"fmt"
 	"math/rand"
+	"os"
+	"strconv"
 	"sync"
 
+	"github.com/olekukonko/tablewriter"
 	"github.com/vantt/go-queuedispatcher/config"
 	"github.com/vantt/go-queuedispatcher/stats"
 )
 
 // Lottery ...
 type Lottery struct {
-	Stats        *stats.ServerStatistic
-	Tickets      map[string]uint64
-	TotalTickets uint64
-	Config       *config.Configuration
+	statAgent    *stats.StatisticAgent
+	config       *config.BrokerConfig
+	tickets      map[string]uint64
+	priority     map[string]uint64
+	totalTickets uint64
 	sync.RWMutex
 }
 
 // NewLotteryScheduler ...
-func NewLotteryScheduler(c *config.Configuration, ss *stats.ServerStatistic) *Lottery {
+func NewLotteryScheduler(sa *stats.StatisticAgent, c *config.BrokerConfig) *Lottery {
 	return &Lottery{
-		Stats:        ss,
-		Config:       c,
-		TotalTickets: 0,
+		statAgent:    sa,
+		config:       c,
+		priority:     make(map[string]uint64),
+		totalTickets: 0,
 	}
 }
 
@@ -37,8 +43,11 @@ func (lt *Lottery) GetNextQueue() (queueName string, found bool) {
 	lt.RLock()
 	defer lt.RUnlock()
 
-	for _, ticket := range lt.Tickets {
+	var ticket uint64
+
+	for queueName, ticket = range lt.tickets {
 		counter = counter + ticket
+
 		if counter > winner {
 			found = true
 			break
@@ -49,54 +58,106 @@ func (lt *Lottery) GetNextQueue() (queueName string, found bool) {
 }
 
 // Schedule do re-assign the tickets everytime that Statistic changed
-func (lt *Lottery) Schedule() {
+func (lt *Lottery) Schedule(done <-chan struct{}, wg *sync.WaitGroup) {
+	var wg2 sync.WaitGroup
+	wg2.Add(1)
+	chanUpdate := lt.statAgent.StartAgent(done, &wg2)
+
 	go func() {
-		for range lt.Stats.UpdateChan {
-			lt.assignTickets()
+		defer func() {
+			wg2.Wait()
+			wg.Done()
+			fmt.Println("QUIT Scheduler")
+		}()
+
+		for {
+			select {
+			case stats := <-chanUpdate:
+				lt.assignTickets(stats)
+			case <-done:
+				return
+			}
 		}
 	}()
 }
 
-func (lt *Lottery) assignTickets() {
+func (lt *Lottery) assignTickets(stats *stats.ServerStatistic) {
 	tickets := make(map[string]uint64)
 	total := uint64(0)
 
 	// assign WSJF for every queue
-	for _, queueName := range lt.Stats.GetQueueNames() {
-		wsjf := lt.wsjf(queueName)
+	for _, queueName := range stats.GetQueueNames() {
 
-		if wsjf > 0 {
-			total += wsjf
-			tickets[queueName] = wsjf
+		if stat, found := stats.GetQueue(queueName); found {
+			wsjf := lt.wsjf(stat, lt.getQueuePriority(queueName))
+
+			if wsjf > 0 {
+				total = total + wsjf
+				tickets[queueName] = wsjf
+			}
 		}
 	}
 
 	// convert WSJF to Percent
-	lt.TotalTickets = 100
+	lt.totalTickets = 0
+	fTotal := float64(total)
 	for queueName := range tickets {
-		tickets[queueName] = (tickets[queueName] / total) * 100
+		tickets[queueName] = uint64((float64(tickets[queueName]) / fTotal) * 100)
+		lt.totalTickets += tickets[queueName]
 	}
 
 	lt.Lock()
 	defer lt.Unlock()
 
-	lt.Tickets = tickets
+	lt.tickets = tickets
+
+	//dumpStats(stats, tickets)
+}
+
+func (lt *Lottery) getQueuePriority(queueName string) uint64 {
+	var (
+		priority uint64
+		found    bool
+	)
+
+	if priority, found = lt.priority[queueName]; !found {
+		priority = lt.config.GetTopicPriority(queueName)
+		lt.priority[queueName] = priority
+	}
+
+	return priority
 }
 
 // WSJF = Cost of Delay / Job Duration(Size)
 // Cost of Delay = NumJobs * Priority
 // JobDuration = NumJobs * JobAvgTime
-func (lt *Lottery) wsjf(queueName string) uint64 {
-	priority := uint64(1)
-	stat, found := lt.Stats.GetQueue(queueName)
+func (lt *Lottery) wsjf(stat *stats.QueueStatistic, priority uint64) uint64 {
+	NumJobs := stat.GetTotalItems()
+	AvgCost := stat.GetAvgJobCost()
 
-	if !found {
-		return 0
+	CostOfDelay := NumJobs * priority
+	JobDuration := NumJobs * AvgCost
+	JobDuration = 1
+
+	return CostOfDelay / JobDuration
+}
+
+func dumpStats(stats *stats.ServerStatistic, tickets map[string]uint64) {
+
+	var ticket uint64
+	var found bool
+
+	table := tablewriter.NewWriter(os.Stdout)
+	table.SetHeader([]string{"Queue", "Ready", "Ticket"})
+
+	for queueName, stat := range stats.Queues {
+
+		if ticket, found = tickets[queueName]; !found {
+			ticket = 0
+		}
+
+		table.Append([]string{queueName, strconv.FormatUint(stat.GetTotalItems(), 10), strconv.FormatUint(ticket, 10)})
 	}
 
-	NumJobs := stat.GetTotalItems()
-	CostOfDelay := NumJobs * priority
-	JobDuration := NumJobs * stat.GetAvgJobCost()
-
-	return (CostOfDelay / JobDuration)
+	table.Render() // Send output
 }

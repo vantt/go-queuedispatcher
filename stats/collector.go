@@ -1,96 +1,98 @@
 package stats
 
 import (
+	"fmt"
+	"sync"
 	"time"
 
 	"github.com/vantt/go-queuedispatcher/queue"
 )
-
-// StatisticCollector ...
-type StatisticCollector struct {
-	Stats     *ServerStatistic
-	QueueInfo queue.InterfaceQueueInfo
-}
 
 const (
 	// ListTubeDelay is the time between sending list-tube to beanstalkd
 	// to discover and watch newly created tubes.
 	ListTubeDelay = 10 * time.Second
 
-	// StatisticDelay is the time between sending list-tube to beanstalkd
-	// to discover and watch newly created tubes.
-	StatisticDelay = 10 * time.Millisecond
+	// StatisticDelay is the time between a new statistic collecting
+	StatisticDelay = 1 * time.Second
 )
 
-// NewStatisticCollector ...
-func NewStatisticCollector(qi queue.InterfaceQueueInfo, ss *ServerStatistic) *StatisticCollector {
-	return &StatisticCollector{
-		Stats:     ss,
-		QueueInfo: qi,
+// StatisticAgent ...
+type StatisticAgent struct {
+	stats     *ServerStatistic
+	queueInfo queue.InterfaceQueueConnectionPool
+}
+
+// NewStatisticAgent ...
+func NewStatisticAgent(qi queue.InterfaceQueueConnectionPool) *StatisticAgent {
+	return &StatisticAgent{
+		queueInfo: qi,
+		stats:     NewServerStatistic(),
 	}
 }
 
 // StartAgent statistic provide method to control CollectorAgent collect the statistics
 // data in a Goroutine.
-func (sc *StatisticCollector) StartAgent() {
-	tick1 := instantTicker(StatisticDelay)
-	tick2 := instantTicker(ListTubeDelay)
+func (sc *StatisticAgent) StartAgent(done <-chan struct{}, wg *sync.WaitGroup) <-chan *ServerStatistic {
+	tick1 := time.NewTicker(StatisticDelay)
+	tick2 := time.NewTicker(ListTubeDelay)
+	chanUpdate := make(chan *ServerStatistic)
 
 	go func() {
+		defer func() {
+			tick1.Stop()
+			tick2.Stop()
+			close(chanUpdate)
+			wg.Done()
+			fmt.Println("QUIT Statistic Agent")
+		}()
+
 		for {
 			select {
-			case <-tick1:
-				sc.updateStatistic()
+			case <-tick1.C:
+				if ss := sc.collectStatistic(); ss.NotEmpty() {
+					chanUpdate <- ss
+				}
 
-			case <-tick2:
+			case <-tick2.C:
 				sc.watchNewQueues()
+
+			case <-done:
+				return
 			}
 		}
 	}()
-}
 
-// ShutdownAgent ...
-func (sc *StatisticCollector) ShutdownAgent() {
-	close(sc.Stats.UpdateChan)
+	return chanUpdate
 }
 
 // WatchNewQueues ...
-func (sc *StatisticCollector) watchNewQueues() {
-	queues, err := sc.QueueInfo.ListQueues()
+func (sc *StatisticAgent) watchNewQueues() {
+	queues, err := sc.queueInfo.ListQueues()
 
 	if err == nil {
 		for _, queueName := range queues {
-			sc.Stats.AddQueue(queueName)
+			sc.stats.AddQueueName(queueName)
 		}
 	}
 }
 
 // WatchNewQueues ...
-func (sc *StatisticCollector) updateStatistic() {
-	for _, queueName := range sc.Stats.GetQueueNames() {
-		total, err := sc.QueueInfo.CountMessages(queueName)
+func (sc *StatisticAgent) collectStatistic() *ServerStatistic {
+	ss := NewServerStatistic()
 
-		if err == nil {
-			if stat, found := sc.Stats.GetQueue(queueName); found {
-				stat.updateTotalItems(total)
+	for _, queueName := range sc.stats.GetQueueNames() {
+		if queueStat, found := sc.stats.GetQueue(queueName); found {
+			total, err := sc.queueInfo.CountMessages(queueName)
+			if err == nil {
+				queueStat.updateTotalItems(total)
+
+				if total > 0 {
+					ss.AddQueueStat(queueStat)
+				}
 			}
 		}
 	}
 
-	sc.Stats.UpdateChan <- true
-}
-
-// Like time.Tick() but also fires immediately.
-func instantTicker(t time.Duration) <-chan time.Time {
-	c := make(chan time.Time)
-	ticker := time.NewTicker(t)
-
-	go func() {
-		c <- time.Now()
-		for t := range ticker.C {
-			c <- t
-		}
-	}()
-
-	return c
+	return ss
 }

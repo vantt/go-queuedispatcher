@@ -1,35 +1,38 @@
 package queue
 
-// InterfaceQueueInfo ...
-type InterfaceQueueInfo interface {
+import (
+	"time"
+)
+
+// Job Structure that wraps Jobs information
+type Job struct {
+	ID        uint64
+	Payload   interface{}
+	QueueName string
+
+	NumTimeOuts uint64        // number of times the job has been reserved and timeout
+	NumReturns  uint64        // number of times the job has been returned (release) to the queue
+	TimeLeft    time.Duration // remain time for processing
+}
+
+// InterfaceQueueConnectionPool ...
+type InterfaceQueueConnectionPool interface {
 
 	// Returns a list of all queue names.
 	ListQueues() (queueNames []string, err error)
 
 	// Count the number of messages in queue. This can be a approximately number.
 	CountMessages(queueName string) (uint64, error)
-}
 
-// InterfaceQueueConsuming for queue handling
-type InterfaceQueueConsuming interface {
+	// ConsumeMessage
+	ConsumeMessage(queueName string, timeout time.Duration) (job *Job, err error)
 
-	/**
-	 * Remove the next message in line. And if no message is available
-	 * wait $duration seconds.
-	 *
-	 * @param string $queueName
-	 * @param int    $duration
-	 *
-	 * @return array An array like array($message, $receipt);
-	 */
-	consumeMessage(queueName string, duration uint64)
+	// DeleteMessage
+	DeleteMessage(queueName string, job *Job) error
 
-	/**
-	 * If the driver supports it, this will be called when a message
-	 * have been consumed.
-	 *
-	 * @param string $queueName
-	 * @param mixed  $receipt
-	 */
-	// acknowledgeMessage(string queueName, interface{} receipt)
+	// ReturnMessage
+	ReturnMessage(queueName string, job *Job, delay time.Duration) error
+
+	// GiveupMessage
+	GiveupMessage(queueName string, job *Job) error
 }

@@ -1,0 +1,59 @@
+package dispatcher
+
+// Work ...
+type Work struct {
+	// heap index
+	idx int
+
+	// WOK channel
+	wok chan *TaskRequest
+
+	//fx ProcessFxInterface
+
+	// number of pending request this worker is working on
+	pending int
+}
+
+// WorkerPool ...
+type WorkerPool []*Work
+
+func (w *Work) doWork(done chan *Work) {
+	// worker works indefinitely
+	for {
+		// extract request from WOK channel
+		req := <-w.wok
+		// write to RESP channel
+		req.chanRespond <- w.fx.run(req.Job)
+		// write to DONE channel
+		done <- w
+	}
+}
+
+func (p WorkerPool) Len() int { return len(p) }
+
+func (p WorkerPool) Less(i, j int) bool {
+	return p[i].pending < p[j].pending
+}
+
+func (p *WorkerPool) Swap(i, j int) {
+	a := *p
+	a[i], a[j] = a[j], a[i]
+	a[i].idx = i
+	a[j].idx = j
+}
+
+func (p *WorkerPool) Push(x interface{}) {
+	n := len(*p)
+	item := x.(*Work)
+	item.idx = n
+	*p = append(*p, item)
+}
+
+func (p *WorkerPool) Pop() interface{} {
+	old := *p
+	n := len(old)
+	item := old[n-1]
+	item.idx = -1 // for safety
+	*p = old[0 : n-1]
+	return item
+}

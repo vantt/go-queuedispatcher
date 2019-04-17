@@ -1,0 +1,70 @@
+package unused
+
+import (
+	"container/heap"
+)
+
+// Balancer ...
+type Balancer struct {
+	// a pool of workers
+	pool    WorkerPool
+	done    chan *Work
+	nWorker uint64
+}
+
+// NewBalancer ...
+func NewBalancer(nWorker uint64) *Balancer {
+	return &Balancer{nWorker: nWorker}
+}
+
+// Start ...
+func (b *Balancer) Start(req chan *TaskRequest) {
+	b.init()
+	go b.balance(req)
+}
+
+func (b *Balancer) init() {
+	// create nWorker WOK channels
+	b.pool = make(WorkerPool, 0, b.nWorker)
+	b.done = make(chan *Work, b.nWorker)
+
+	for i := uint64(0); i < b.nWorker; i++ {
+		w := &Work{wok: make(chan *TaskRequest, b.nWorker)}
+
+		// put them in heap
+		heap.Push(&b.pool, w)
+		go w.doWork(b.done)
+	}
+}
+
+func (b *Balancer) balance(req chan *TaskRequest) {
+	for {
+		select {
+		// extract request from REQ channel
+		case request := <-req:
+			b.dispatch(request)
+		// read from DONE channel
+		case w := <-b.done:
+			b.completed(w)
+			// case <-done:
+			// 	return
+		}
+	}
+}
+
+func (b *Balancer) dispatch(req *TaskRequest) {
+	// Grab least loaded worker
+	w := heap.Pop(&b.pool).(*Work)
+	w.wok <- req
+	w.pending++
+	// Put it back into heap while it is working
+	heap.Push(&b.pool, w)
+}
+
+func (b *Balancer) completed(w *Work) {
+	w.pending--
+	// remove from heap
+	heap.Remove(&b.pool, w.idx)
+	// Put it back
+	heap.Push(&b.pool, w)
+}

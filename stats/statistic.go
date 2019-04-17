@@ -14,26 +14,34 @@ type QueueStatistic struct {
 
 // ServerStatistic ...
 type ServerStatistic struct {
-	Queues     map[string]*QueueStatistic
-	UpdateChan chan bool
+	Queues map[string]*QueueStatistic
 	sync.RWMutex
 }
 
 // NewServerStatistic ...
 func NewServerStatistic() *ServerStatistic {
 	return &ServerStatistic{
-		Queues:     make(map[string]*QueueStatistic),
-		UpdateChan: make(chan bool),
+		Queues: make(map[string]*QueueStatistic),
 	}
 }
 
-// AddQueue ...
-func (ss *ServerStatistic) AddQueue(queueName string) {
+// AddQueueName ...
+func (ss *ServerStatistic) AddQueueName(queueName string) {
 	ss.Lock()
 	defer ss.Unlock()
 
 	if _, found := ss.Queues[queueName]; !found {
 		ss.Queues[queueName] = newQueueStatistic(queueName)
+	}
+}
+
+// AddQueueStat ...
+func (ss *ServerStatistic) AddQueueStat(stat *QueueStatistic) {
+	ss.Lock()
+	defer ss.Unlock()
+
+	if _, found := ss.Queues[stat.Name]; !found {
+		ss.Queues[stat.Name] = stat
 	}
 }
 
@@ -53,6 +61,11 @@ func (ss *ServerStatistic) GetQueueNames() []string {
 	}
 
 	return keys
+}
+
+// NotEmpty ...
+func (ss *ServerStatistic) NotEmpty() bool {
+	return len(ss.Queues) > 0
 }
 
 func newQueueStatistic(queueName string) *QueueStatistic {

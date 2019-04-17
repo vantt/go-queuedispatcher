@@ -8,28 +8,56 @@ import (
 
 // Configuration structure
 type Configuration struct {
-	Brokers []broker `yaml:"brokers"`
+	Brokers []BrokerConfig `yaml:"brokers"`
 }
 
-type broker struct {
-	Scheduler  string           `yaml:"scheduler"`
-	WorkerPool workerpool       `yaml:"workerpool"`
-	Queues     map[string]queue `yaml:"queues"`
-}
-
-type workerpool struct {
-	WorkerType string `yaml:"workertype"`
-	Endpoint   string `yaml:"endpoint"`
-	Concurrent uint   `yaml:"concurrent"`
+// BrokerConfig ...
+type BrokerConfig struct {
+	Scheduler      string  `yaml:"scheduler"`
+	Host           string  `yaml:"host"`
+	WorkerType     string  `yaml:"workertype"`
+	WorkerEndpoint string  `yaml:"workerendpoint"`
+	Concurrent     uint16  `yaml:"concurrent"`
+	Queues         []queue `yaml:"queues"`
+	queuesPriority map[string]uint64
 }
 
 type queue struct {
-	Priority uint     `yaml:"priority"`
-	Topics   []string `yaml:"topics"`
+	Priority   uint64   `yaml:"priority"`
+	QueueNames []string `yaml:"queuenames"`
+}
+
+// GetTopicPriority ...
+func (bc *BrokerConfig) GetTopicPriority(topicName string) uint64 {
+
+	if bc.queuesPriority == nil {
+		bc.queuesPriority = make(map[string]uint64)
+
+		for _, queue := range bc.Queues {
+			for _, qName := range queue.QueueNames {
+				bc.queuesPriority[qName] = queue.Priority
+			}
+		}
+	}
+
+	// spew.Dump(bc.queuesPriority)
+	// panic("out")
+	var (
+		priority uint64
+		found    bool
+	)
+
+	if priority, found = bc.queuesPriority[topicName]; !found {
+		if priority, found = bc.queuesPriority["others"]; !found {
+			priority = 0
+		}
+	}
+
+	return priority
 }
 
 // ParseConfig will find and Parse Config
-func ParseConfig() Configuration {
+func ParseConfig() *Configuration {
 	cfg := viper.New()
 	cfg.SetConfigName("config")
 	cfg.AddConfigPath("/etc/go-queuedispatcher")
@@ -48,5 +76,5 @@ func ParseConfig() Configuration {
 		panic("Unable to unmarshal config")
 	}
 
-	return config
+	return &config
 }

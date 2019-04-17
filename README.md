@@ -1,1 +1,3 @@
 # go-queuedispatcher
+
+dispatcher --> worker

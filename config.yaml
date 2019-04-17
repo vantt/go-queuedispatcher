@@ -1,37 +1,32 @@
 brokers:
   - scheduler: lottery
-    workerpool:
-      workertype: cmd
-      endpoint: 'php bin/console.php exec'
-      concurrent: 20
-    queues:
-      level1:
-        priority: 300
-        topics: 
-          - "a"
-          - "b"
-          - "c"
-      level2:
-        priority: 100
-        topics: 
-          - "x"
-          - "y"
-          - "z"      
-  - scheduler: lcsf
-    workerpool:
-      workertype: fastcgi
-      endpoint: "php bin/console.php exec"
-      concurrent: 20
-    queues:
-      level1:
-        priority: 300
-        topics: 
-          - a
-          - b
-          - c  
-      level2:
-        priority: 100
-        topics: 
-          - theRest
-          - "y"
-          - z
+    host: "localhost:11300"
+    workertype: cmd
+    workerendpoint: "cat"
+    concurrent: 3
+    queues:    
+      - priority: 300
+        queuenames: 
+          - "default1"          
+      - priority: 100
+        queuenames: 
+          - "default2"
+      - priority: 50
+        queuenames:           
+          - "others"                
+  - scheduler: lottery
+    host: "52.221.223.247:11300"
+    workertype: fastcgi
+    workerendpoint: "php bin/console.php exec"
+    concurrent: 20
+    queues:    
+      - priority: 300
+        queuenames: 
+          - "default1"          
+      - priority: 100
+        queuenames: 
+          - "default2"
+          - "others" 
+      - priority: 50
+        queuenames:           
+          - "others"      

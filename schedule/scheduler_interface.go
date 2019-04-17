@@ -1,8 +1,12 @@
 package schedule
 
+import (
+	"sync"
+)
+
 // InterfaceScheduler ...
 type InterfaceScheduler interface {
-	Schedule()
+	Schedule(done <-chan struct{}, wg *sync.WaitGroup)
 
 	GetNextQueue() (queueName string, found bool)
 }
