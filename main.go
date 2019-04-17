@@ -34,7 +34,7 @@ func init() {
 func main() {
 	grmon.Start()
 
-	putRandomJobs("localhost:11300")
+	// putRandomJobs("localhost:11300")
 	// panic("done")
 
 	var wg sync.WaitGroup

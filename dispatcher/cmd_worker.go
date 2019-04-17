@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/vantt/go-cmd"
 	"gopkg.in/go-playground/pool.v3"
 )
@@ -25,10 +24,16 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
 		req := request.(*TaskRequest)
 		job := req.Job
-		result := &TaskResult{ID: req.ID, Job: job}
 
 		ticker1 := time.NewTicker(job.TimeLeft + ttrMargin)
 		ticker2 := time.NewTicker(1 * time.Millisecond)
+
+		defer func() {
+			ticker1.Stop()
+			ticker2.Stop()
+		}()
+
+		result := &TaskResult{ID: req.ID, Job: job}
 
 		opt := cmd.Options{
 			Stdin:     true,
@@ -36,7 +41,7 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 			Streaming: false,
 		}
 
-		process := cmd.NewCmdOptions(opt, Shell, "-C", shellCmd)
+		process := cmd.NewCmdOptions(opt, Shell, "-c", shellCmd)
 		statChan := process.Start()
 
 		// send Job info to Command
@@ -67,7 +72,7 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 
 			case status := <-statChan:
 				fmt.Println("Get Status")
-				spew.Dump(status.Error)
+
 				result.Error = status.Error
 				result.ExitStatus = status.Exit
 				result.isFail = (!status.Complete || status.Error != nil || status.Exit > 0)
@@ -78,12 +83,6 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 				break waitLoop
 			}
 		}
-
-		fmt.Println("Process Done")
-		fmt.Println("%v", result)
-
-		ticker1.Stop()
-		ticker2.Stop()
 
 		return result, nil
 	}

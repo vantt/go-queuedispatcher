@@ -3,7 +3,7 @@ brokers:
     host: "localhost:11300"
     workertype: cmd
     workerendpoint: "cat"
-    concurrent: 3
+    concurrent: 10
     queues:    
       - priority: 300
         queuenames: 

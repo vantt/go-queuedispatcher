@@ -134,7 +134,6 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 
 		// if batch has jobs to do
 		if numWorks > 0 {
-
 			// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
 			// if calling Cancel() it calles QueueComplete() internally
 			batch.QueueComplete()
@@ -154,23 +153,17 @@ func (tc *Dispatcher) handleBatchResult(result pool.WorkUnit, wg *sync.WaitGroup
 }
 
 func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err error) {
-	//fmt.Println("got result %d", result.ID)
-
 	if taskErr != nil {
 		//fmt.Println("result error")
 	}
 
 	job := result.Job
-	//fmt.Println("Result Body")
-	//spew.Dump(result.Body)
 
 	if result.isTimedOut {
 		//fmt.Println("Time Out")
 		//b.log.Printf("job %d timed out", job.Id)
 		return
 	}
-
-	//b.log.Printf("job %d finished with exit(%d)", job.Id, result.ExitStatus)
 
 	switch result.ExitStatus {
 	case 0:
