@@ -12,6 +12,7 @@ import (
 	"github.com/bcicen/grmon/agent"
 	"github.com/brianvoe/gofakeit"
 	"github.com/kr/beanstalk"
+	"github.com/sirupsen/logrus"
 	"github.com/vantt/go-queuedispatcher/config"
 	"github.com/vantt/go-queuedispatcher/dispatcher"
 	"github.com/vantt/go-queuedispatcher/queue"
@@ -22,7 +23,18 @@ import (
 
 var (
 	conf *config.Configuration
+	log  = logrus.New() // Create a new instance of the logger. You can have any number of instances.
 )
+
+func init() {
+	log.Out = os.Stdout
+
+	// Production
+	// log.SetFormatter(&logrus.JSONFormatter{})
+
+	// DEV Environment
+	log.SetFormatter(&logrus.TextFormatter{})
+}
 
 func init() {
 	// init random seed
@@ -34,7 +46,7 @@ func init() {
 func main() {
 	grmon.Start()
 
-	// putRandomJobs("localhost:11300")
+	putRandomJobs("localhost:11300")
 	// panic("done")
 
 	var wg sync.WaitGroup
@@ -49,13 +61,14 @@ func main() {
 	}()
 
 	processFn := func(request interface{}) pool.WorkFunc {
-		return dispatcher.NewCmdWorker(conf.Brokers[0].WorkerEndpoint, request)
+		cmd := conf.Brokers[0].WorkerEndpoint
+		return dispatcher.NewCmdWorker(request, cmd[0], cmd[1:]...)
 	}
 
 	connPool := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
 	statAgent := stats.NewStatisticAgent(connPool)
 	scheduler := schedule.NewLotteryScheduler(statAgent, &(conf.Brokers[0]))
-	dpatcher := dispatcher.NewDispatcher(connPool, scheduler, conf.Brokers[0].Concurrent, 3*time.Second)
+	dpatcher := dispatcher.NewDispatcher(connPool, scheduler, log, conf.Brokers[0].Concurrent, 3*time.Second)
 
 	wg.Add(2)
 	scheduler.Schedule(done, &wg)

@@ -1,8 +1,8 @@
 package dispatcher
 
 import (
-	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/vantt/go-cmd"
@@ -20,17 +20,19 @@ const (
 )
 
 // NewCmdWorker ...
-func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
+func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.WorkFunc {
 	return func(wu pool.WorkUnit) (interface{}, error) {
+		start := time.Now()
+
 		req := request.(*TaskRequest)
 		job := req.Job
 
-		ticker1 := time.NewTicker(job.TimeLeft + ttrMargin)
-		ticker2 := time.NewTicker(1 * time.Millisecond)
+		tickerTimeOut := time.NewTicker(job.TimeLeft + ttrMargin)
+		tickerMonitor := time.NewTicker(1 * time.Millisecond)
 
 		defer func() {
-			ticker1.Stop()
-			ticker2.Stop()
+			tickerTimeOut.Stop()
+			tickerMonitor.Stop()
 		}()
 
 		result := &TaskResult{ID: req.ID, Job: job}
@@ -41,7 +43,7 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 			Streaming: false,
 		}
 
-		process := cmd.NewCmdOptions(opt, Shell, "-c", shellCmd)
+		process := cmd.NewCmdOptions(opt, cmdName, cmdArgs...)
 		statChan := process.Start()
 
 		// send Job info to Command
@@ -54,24 +56,24 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 		for {
 			select {
 			// process time out
-			case <-ticker1.C:
-				fmt.Println("Process Time Out")
+			case <-tickerTimeOut.C:
 				process.Stop()
 				result.isTimedOut = true
 
-				break waitLoop
+				break waitLoop // ?? remove this
 
-			case <-ticker2.C:
+			case <-tickerMonitor.C:
 				// pool request to cancel
 				if wu.IsCancelled() {
-					fmt.Println("Pool request to cancel task.")
 					process.Stop()
 					result.isTimedOut = true
-					break waitLoop
+
+					break waitLoop // ?? remove this
 				}
 
 			case status := <-statChan:
-				fmt.Println("Get Status")
+				//fmt.Println("Get Status")
+				//spew.Dump(status)
 
 				result.Error = status.Error
 				result.ExitStatus = status.Exit
@@ -79,11 +81,39 @@ func NewCmdWorker(shellCmd string, request interface{}) pool.WorkFunc {
 				result.isExecuted = (status.Complete && status.Error == nil)
 				result.isTimedOut = false
 				result.Body = status.Stdout
-				process.Stop()
+				result.ErrorMsg = strings.Join(status.Stderr[:], "\n")
+
+				if result.Error != nil {
+					result.ErrorMsg += "\n--------\n" + result.Error.Error()
+				}
+
 				break waitLoop
 			}
 		}
 
+		result.Runtime = time.Since(start).Seconds()
+
 		return result, nil
 	}
 }
+
+/**
+Get Status
+(cmd.Status) {
+ Cmd: (string) (len=9) "/bin/bash",
+ PID: (int) 22188,
+ Complete: (bool) true,
+ Exit: (int) 126,
+ Error: (error) <nil>,
+ StartTs: (int64) 1555564309928581478,
+ StopTs: (int64) 1555564309948296312,
+ Runtime: (float64) 0.019714811,
+ Stdout: ([]string) {
+ },
+ Stderr: ([]string) (len=1 cap=1) {
+  (string) (len=46) "/bin/cat: /bin/cat: cannot execute binary file"
+ }
+}
+
+
+**/

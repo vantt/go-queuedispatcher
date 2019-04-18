@@ -8,7 +8,7 @@ import (
 type QueueStatistic struct {
 	Name       string
 	TotalItems uint64
-	AvgJobCost uint64
+	AvgJobCost float64
 	sync.RWMutex
 }
 
@@ -72,7 +72,7 @@ func newQueueStatistic(queueName string) *QueueStatistic {
 	return &QueueStatistic{
 		Name:       queueName,
 		TotalItems: 0,
-		AvgJobCost: 0,
+		AvgJobCost: 0.1,
 	}
 }
 
@@ -100,8 +100,8 @@ func (qs *QueueStatistic) updateTotalItems(value uint64) {
 	qs.TotalItems = value
 }
 
-// updateCost ...
-func (qs *QueueStatistic) updateCost(cost uint64) {
+// UpdateCost ...
+func (qs *QueueStatistic) UpdateCost(cost float64) {
 	qs.Lock()
 	defer qs.Unlock()
 
@@ -109,7 +109,7 @@ func (qs *QueueStatistic) updateCost(cost uint64) {
 }
 
 // GetAvgJobCost ...
-func (qs *QueueStatistic) GetAvgJobCost() uint64 {
+func (qs *QueueStatistic) GetAvgJobCost() float64 {
 	qs.RLock()
 	defer qs.RUnlock()
 

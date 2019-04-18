@@ -1,11 +1,10 @@
 package dispatcher
 
 import (
-	"errors"
-	"fmt"
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/vantt/go-queuedispatcher/queue"
 	"github.com/vantt/go-queuedispatcher/schedule"
 	"gopkg.in/go-playground/pool.v3"
@@ -31,20 +30,18 @@ type Dispatcher struct {
 	processingJobs uint16
 	p              pool.Pool
 	timeout        time.Duration
-	chanRequest    chan *TaskRequest
-	chanResponse   chan *TaskResult
+	log            *log.Logger
 }
 
 // NewDispatcher ...
-func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, concurrent uint16, timeout time.Duration) *Dispatcher {
+func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, log *log.Logger, concurrent uint16, timeout time.Duration) *Dispatcher {
 	return &Dispatcher{
 		queues:         qc,
 		scheduler:      sc,
 		concurrent:     concurrent,
 		timeout:        timeout,
+		log:            log,
 		processingJobs: 0,
-		chanRequest:    make(chan *TaskRequest, concurrent),
-		chanResponse:   make(chan *TaskResult, concurrent),
 	}
 }
 
@@ -66,7 +63,7 @@ func (tc *Dispatcher) Start(processFn processFunction, done <-chan struct{}, wg 
 			close(resultChan)
 			wg.Done()
 
-			fmt.Println("QUIT Dispatcher.")
+			tc.log.Info("QUIT Dispatcher.")
 		}()
 
 		// Start an send goroutine for each input channel in cs.
@@ -114,9 +111,9 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 		tries := uint16(0)
 
 		for tc.processingJobs < tc.concurrent {
-			job, err := tc.getNextJob()
+			job := tc.getNextJob()
 
-			if err == nil {
+			if job != nil {
 				// if job was processed too many times, just GiveUp (burry job)
 				if job.NumReturns > ReturnTries || job.NumTimeOuts > TimeoutTries {
 					tc.queues.GiveupMessage(job.QueueName, job)
@@ -153,27 +150,32 @@ func (tc *Dispatcher) handleBatchResult(result pool.WorkUnit, wg *sync.WaitGroup
 }
 
 func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err error) {
-	if taskErr != nil {
-		//fmt.Println("result error")
-	}
-
 	job := result.Job
+	logger := tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID})
+
+	tc.scheduler.UpdateJobCost(job.QueueName, result.Runtime)
+
+	// if taskErr != nil {
+	// 	logger.Error("Task execution error")
+	// }
 
 	if result.isTimedOut {
-		//fmt.Println("Time Out")
-		//b.log.Printf("job %d timed out", job.Id)
+		logger.Error("Task execution TimeOut")
 		return
 	}
 
 	switch result.ExitStatus {
 	case 0:
-		//fmt.Println("Will Delete Message : %s ", job.QueueName)
-		//b.log.Printf("deleting job %d", job.Id)
+
 		err = tc.queues.DeleteMessage(job.QueueName, job)
-		//spew.Dump(err)
+
+		if err == nil {
+			logger.Info("Deleting Job SUCCESS")
+		} else {
+			logger.WithFields(log.Fields{"error": err.Error}).Error("Deleting Job FAIL")
+		}
 
 	default:
-		//fmt.Println("Will Return Message")
 		r := job.NumReturns
 
 		if r <= 0 {
@@ -183,9 +185,16 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 		// r*r*r*r means final of 10 tries has 1h49m21s delay, 4h15m33s total.
 		// See: http://play.golang.org/p/I15lUWoabI
 		delay := time.Duration(r*r*r*r) * time.Second
+
+		logger.WithFields(log.Fields{"error": result.ErrorMsg}).Error("Task execution FAIL")
+		logger.WithFields(log.Fields{"delay": delay}).Info("Will return job with delay.")
+
 		err = tc.queues.ReturnMessage(job.QueueName, job, delay)
 
-		//b.log.Printf("releasing job %d with %v delay (%d retries)", job.Id, delay, r)
+		if err != nil {
+			logger.WithFields(log.Fields{"error": err.Error()}).Error("Returning Job Fail")
+		}
+
 	}
 
 	tc.processingJobs--
@@ -193,10 +202,12 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 	return
 }
 
-func (tc *Dispatcher) getNextJob() (*queue.Job, error) {
+func (tc *Dispatcher) getNextJob() *queue.Job {
 	if queueName, found := tc.scheduler.GetNextQueue(); found {
-		return tc.queues.ConsumeMessage(queueName, tc.timeout)
+		if job, err := tc.queues.ConsumeMessage(queueName, tc.timeout); err == nil {
+			return job
+		}
 	}
 
-	return nil, errors.New("Could not reserve task")
+	return nil
 }

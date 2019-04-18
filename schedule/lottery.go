@@ -83,7 +83,8 @@ func (lt *Lottery) Schedule(done <-chan struct{}, wg *sync.WaitGroup) {
 
 func (lt *Lottery) assignTickets(stats *stats.ServerStatistic) {
 	tickets := make(map[string]uint64)
-	total := uint64(0)
+	tmpTickets := make(map[string]float64)
+	total := float64(0)
 
 	// assign WSJF for every queue
 	for _, queueName := range stats.GetQueueNames() {
@@ -93,16 +94,16 @@ func (lt *Lottery) assignTickets(stats *stats.ServerStatistic) {
 
 			if wsjf > 0 {
 				total = total + wsjf
-				tickets[queueName] = wsjf
+				tmpTickets[queueName] = wsjf
 			}
 		}
 	}
 
 	// convert WSJF to Percent
 	lt.totalTickets = 0
-	fTotal := float64(total)
-	for queueName := range tickets {
-		tickets[queueName] = uint64((float64(tickets[queueName]) / fTotal) * 100)
+
+	for queueName := range tmpTickets {
+		tickets[queueName] = uint64((tmpTickets[queueName] / total) * 100)
 		lt.totalTickets += tickets[queueName]
 	}
 
@@ -111,7 +112,7 @@ func (lt *Lottery) assignTickets(stats *stats.ServerStatistic) {
 
 	lt.tickets = tickets
 
-	//dumpStats(stats, tickets)
+	dumpStats(stats, tickets)
 }
 
 func (lt *Lottery) getQueuePriority(queueName string) uint64 {
@@ -131,15 +132,19 @@ func (lt *Lottery) getQueuePriority(queueName string) uint64 {
 // WSJF = Cost of Delay / Job Duration(Size)
 // Cost of Delay = NumJobs * Priority
 // JobDuration = NumJobs * JobAvgTime
-func (lt *Lottery) wsjf(stat *stats.QueueStatistic, priority uint64) uint64 {
-	NumJobs := stat.GetTotalItems()
+func (lt *Lottery) wsjf(stat *stats.QueueStatistic, priority uint64) float64 {
+	NumJobs := float64(stat.GetTotalItems())
 	AvgCost := stat.GetAvgJobCost()
 
-	CostOfDelay := NumJobs * priority
+	CostOfDelay := NumJobs * float64(priority)
 	JobDuration := NumJobs * AvgCost
-	JobDuration = 1
 
 	return CostOfDelay / JobDuration
+}
+
+// UpdateJobCost ...
+func (lt *Lottery) UpdateJobCost(queueName string, jobCost float64) {
+	lt.statAgent.UpdateJobCost(queueName, jobCost)
 }
 
 func dumpStats(stats *stats.ServerStatistic, tickets map[string]uint64) {
@@ -148,7 +153,7 @@ func dumpStats(stats *stats.ServerStatistic, tickets map[string]uint64) {
 	var found bool
 
 	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{"Queue", "Ready", "Ticket"})
+	table.SetHeader([]string{"Queue", "Ready", "Ticket", "AvgCost"})
 
 	for queueName, stat := range stats.Queues {
 
@@ -156,7 +161,7 @@ func dumpStats(stats *stats.ServerStatistic, tickets map[string]uint64) {
 			ticket = 0
 		}
 
-		table.Append([]string{queueName, strconv.FormatUint(stat.GetTotalItems(), 10), strconv.FormatUint(ticket, 10)})
+		table.Append([]string{queueName, strconv.FormatUint(stat.GetTotalItems(), 10), strconv.FormatUint(ticket, 10), strconv.FormatFloat(stat.GetAvgJobCost(), 'f', 10, 64)})
 	}
 
 	table.Render() // Send output

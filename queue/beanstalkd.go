@@ -2,7 +2,6 @@ package queue
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"time"
 
@@ -81,8 +80,6 @@ func (bs *BeanstalkdConnectionPool) ConsumeMessage(queueName string, timeout tim
 				TimeLeft:    0,
 			}
 
-			fmt.Println("Consume Message %d  %p", id, bs.GetQueue(queueName))
-
 			job.NumReturns, err = bs.uint64JobStat(queueName, job, "releases")
 			job.NumTimeOuts, err = bs.uint64JobStat(queueName, job, "timeouts")
 			ttl, err = bs.statJob(queueName, job, "time-left")
@@ -106,7 +103,6 @@ func (bs *BeanstalkdConnectionPool) ConsumeMessage(queueName string, timeout tim
 
 // DeleteMessage ...
 func (bs *BeanstalkdConnectionPool) DeleteMessage(queueName string, job *Job) error {
-	fmt.Println("Delete Message %d  %p", job.ID, bs.GetQueue(queueName))
 	return bs.GetQueue(queueName).Conn.Delete(job.ID)
 }
 

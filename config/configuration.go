@@ -13,12 +13,12 @@ type Configuration struct {
 
 // BrokerConfig ...
 type BrokerConfig struct {
-	Scheduler      string  `yaml:"scheduler"`
-	Host           string  `yaml:"host"`
-	WorkerType     string  `yaml:"workertype"`
-	WorkerEndpoint string  `yaml:"workerendpoint"`
-	Concurrent     uint16  `yaml:"concurrent"`
-	Queues         []queue `yaml:"queues"`
+	Scheduler      string   `yaml:"scheduler"`
+	Host           string   `yaml:"host"`
+	WorkerType     string   `yaml:"workertype"`
+	WorkerEndpoint []string `yaml:"workerendpoint"`
+	Concurrent     uint16   `yaml:"concurrent"`
+	Queues         []queue  `yaml:"queues"`
 	queuesPriority map[string]uint64
 }
 

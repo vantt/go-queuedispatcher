@@ -66,7 +66,13 @@ func (sc *StatisticAgent) StartAgent(done <-chan struct{}, wg *sync.WaitGroup) <
 	return chanUpdate
 }
 
-// WatchNewQueues ...
+// UpdateJobCost ...
+func (sc *StatisticAgent) UpdateJobCost(queueName string, jobCost float64) {
+	if queueStat, found := sc.stats.GetQueue(queueName); found {
+		queueStat.UpdateCost(jobCost)
+	}
+}
+
 func (sc *StatisticAgent) watchNewQueues() {
 	queues, err := sc.queueInfo.ListQueues()
 
@@ -77,7 +83,6 @@ func (sc *StatisticAgent) watchNewQueues() {
 	}
 }
 
-// WatchNewQueues ...
 func (sc *StatisticAgent) collectStatistic() *ServerStatistic {
 	ss := NewServerStatistic()
 

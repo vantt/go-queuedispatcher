@@ -28,6 +28,11 @@ type TaskResult struct {
 
 	// Error raised while attempting to handle the job.
 	Error error
+
+	ErrorMsg string
+
+	// Running Time in Seconds
+	Runtime float64
 }
 
 // TaskRequest ...

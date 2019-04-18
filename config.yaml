@@ -2,7 +2,10 @@ brokers:
   - scheduler: lottery
     host: "localhost:11300"
     workertype: cmd
-    workerendpoint: "cat"
+    workerendpoint: 
+      - "/bin/bash"
+      - "-c"
+      - "cat"
     concurrent: 10
     queues:    
       - priority: 300
@@ -17,7 +20,10 @@ brokers:
   - scheduler: lottery
     host: "52.221.223.247:11300"
     workertype: fastcgi
-    workerendpoint: "php bin/console.php exec"
+    workerendpoint:       
+      - "/bin/bash"
+      - "-c"
+      - "php bin/console.php exec"
     concurrent: 20
     queues:    
       - priority: 300
