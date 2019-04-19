@@ -202,7 +202,7 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 		// See: http://play.golang.org/p/I15lUWoabI
 		delay := time.Duration(r*r*r*r) * time.Second
 
-		logger.WithFields(log.Fields{"error": result.ErrorMsg}).Error("Task execution FAIL")
+		logger.WithFields(log.Fields{"error": result.ErrorMsg}).Error("Job execution FAIL")
 
 		err = tc.queues.ReturnMessage(job.QueueName, job, delay)
 

@@ -56,10 +56,9 @@ func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.W
 		// waiting for Command to finish
 		for {
 			select {
-			// process time out
-			// this will
 			case <-tickerTimeOut.C:
-				fmt.Println("TimeOut ", job.ID)
+				// process time out
+				// kill the process now
 				process.Stop()
 				result.isTimedOut = true
 
@@ -77,9 +76,10 @@ func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.W
 				// please dont break here,
 				// let see:: case status := <-statChan:
 
-			// this case will always happen for:
-			// command finished, or fail, or cancel or timeout
 			case status := <-statChan:
+				// this case will always happen for:
+				// command finished, or fail, or cancel or timeout
+
 				result.Error = status.Error
 				result.ExitStatus = status.Exit
 				result.isFail = (!status.Complete || status.Error != nil || status.Exit > 0)

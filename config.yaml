@@ -5,7 +5,7 @@ brokers:
     workerendpoint: 
       - "/bin/bash"
       - "-c"
-      - "cat"
+      - "source /home/vantt/bash_vantt; cd /ext4Data1/vantt/projects/php/anpha/mio/code; php bin/console.php --no-debug mio:task-handler"
     concurrent: 10
     queues:    
       - priority: 300
@@ -16,14 +16,15 @@ brokers:
           - "default2"
       - priority: 50
         queuenames:           
-          - "others"                
+          - "others"   
+                       
   - scheduler: lottery
-    host: "52.221.223.247:11300"
+    host: "beanstalkd:11300"
     workertype: fastcgi
     workerendpoint:       
       - "/bin/bash"
       - "-c"
-      - "php bin/console.php exec"
+      - "cat "
     concurrent: 20
     queues:    
       - priority: 300

@@ -14,7 +14,7 @@ const (
 	ListTubeDelay = 10 * time.Second
 
 	// StatisticDelay is the time between a new statistic collecting
-	StatisticDelay = 1 * time.Second
+	StatisticDelay = 3 * time.Second
 )
 
 // StatisticAgent ...
