@@ -1,7 +1,9 @@
 package dispatcher
 
 import (
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -26,15 +28,15 @@ type processFunction func(job interface{}) pool.WorkFunc
 type Dispatcher struct {
 	queues         queue.InterfaceQueueConnectionPool
 	scheduler      schedule.InterfaceScheduler
-	concurrent     uint16
-	processingJobs uint16
+	concurrent     int32
+	processingJobs int32
 	p              pool.Pool
 	timeout        time.Duration
 	log            *log.Logger
 }
 
 // NewDispatcher ...
-func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, log *log.Logger, concurrent uint16, timeout time.Duration) *Dispatcher {
+func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, log *log.Logger, concurrent int32, timeout time.Duration) *Dispatcher {
 	return &Dispatcher{
 		queues:         qc,
 		scheduler:      sc,
@@ -83,9 +85,9 @@ func (tc *Dispatcher) Start(processFn processFunction, done <-chan struct{}, wg 
 
 			case <-ticker.C:
 				// sumbit new batch
-				if batch := tc.submitBatch(processFn); batch != nil {
+				if batch1 := tc.submitBatch(processFn); batch1 != nil {
 					wg2.Add(1)
-					go mergeResult(batch.Results())
+					go mergeResult(batch1.Results())
 				}
 
 			case result := <-resultChan:
@@ -93,10 +95,10 @@ func (tc *Dispatcher) Start(processFn processFunction, done <-chan struct{}, wg 
 				go tc.handleBatchResult(result, &wg2)
 
 				// sumbit new batch
-				if batch := tc.submitBatch(processFn); batch != nil {
-					wg2.Add(1)
-					go mergeResult(batch.Results())
-				}
+				// if batch2 := tc.submitBatch(processFn); batch2 != nil {
+				// 	wg2.Add(1)
+				// 	go mergeResult(batch2.Results())
+				// }
 			}
 		}
 	}()
@@ -107,8 +109,13 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 	// Put more tasks in the channel unless it is full
 	if tc.processingJobs < tc.concurrent {
 		batch := tc.p.Batch()
+
+		// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
+		// if calling Cancel() it calles QueueComplete() internally
+		defer batch.QueueComplete()
+
 		numWorks := 0
-		tries := uint16(0)
+		tries := int32(0)
 
 		for tc.processingJobs < tc.concurrent {
 			job := tc.getNextJob()
@@ -116,14 +123,21 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 			if job != nil {
 				// if job was processed too many times, just GiveUp (burry job)
 				if job.NumReturns > ReturnTries || job.NumTimeOuts > TimeoutTries {
-					tc.queues.GiveupMessage(job.QueueName, job)
-				}
+					err := tc.queues.GiveupMessage(job.QueueName, job)
 
-				// otherwise put Job into the Channel
-				// fmt.Println("get task")
-				tc.processingJobs++
-				numWorks++
-				batch.Queue(processFn(&TaskRequest{Job: job}))
+					if err != nil {
+						tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Error("Give up job Fail")
+					} else {
+						tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Give up job")
+					}
+				} else {
+
+					// otherwise put Job into the Channel
+					numWorks++
+					atomic.AddInt32(&(tc.processingJobs), 1)
+					tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Process job")
+					batch.Queue(processFn(&TaskRequest{Job: job}))
+				}
 			} else if tries++; tries > tc.concurrent {
 				break
 			}
@@ -131,10 +145,6 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 
 		// if batch has jobs to do
 		if numWorks > 0 {
-			// DO NOT FORGET THIS OR GOROUTINES WILL DEADLOCK
-			// if calling Cancel() it calles QueueComplete() internally
-			batch.QueueComplete()
-
 			return batch
 		}
 	}
@@ -150,8 +160,13 @@ func (tc *Dispatcher) handleBatchResult(result pool.WorkUnit, wg *sync.WaitGroup
 }
 
 func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err error) {
+	defer func() {
+		atomic.AddInt32(&(tc.processingJobs), -1)
+	}()
+
 	job := result.Job
 	logger := tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID})
+	logger.Info("Handle job result")
 
 	tc.scheduler.UpdateJobCost(job.QueueName, result.Runtime)
 
@@ -170,9 +185,10 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 		err = tc.queues.DeleteMessage(job.QueueName, job)
 
 		if err == nil {
-			logger.Info("Deleting Job SUCCESS")
+			logger.Info("Delete job")
+			logger.Info(strings.Join(result.Body, "..."))
 		} else {
-			logger.WithFields(log.Fields{"error": err.Error}).Error("Deleting Job FAIL")
+			logger.WithFields(log.Fields{"error": err.Error}).Error("Deleting job FAIL")
 		}
 
 	default:
@@ -187,24 +203,23 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 		delay := time.Duration(r*r*r*r) * time.Second
 
 		logger.WithFields(log.Fields{"error": result.ErrorMsg}).Error("Task execution FAIL")
-		logger.WithFields(log.Fields{"delay": delay}).Info("Will return job with delay.")
 
 		err = tc.queues.ReturnMessage(job.QueueName, job, delay)
 
 		if err != nil {
-			logger.WithFields(log.Fields{"error": err.Error()}).Error("Returning Job Fail")
+			logger.WithFields(log.Fields{"error": err.Error()}).Error("Return job Fail")
+		} else {
+			logger.Info("Return job")
 		}
-
 	}
-
-	tc.processingJobs--
 
 	return
 }
 
 func (tc *Dispatcher) getNextJob() *queue.Job {
 	if queueName, found := tc.scheduler.GetNextQueue(); found {
-		if job, err := tc.queues.ConsumeMessage(queueName, tc.timeout); err == nil {
+		if job, err := tc.queues.ConsumeMessage(queueName, tc.timeout); err == nil && job != nil {
+			tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Reserve job")
 			return job
 		}
 	}

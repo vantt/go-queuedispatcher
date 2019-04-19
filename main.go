@@ -44,6 +44,36 @@ func init() {
 }
 
 func main() {
+	//putRandomJobs("localhost:11300")
+	// connPool1 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
+	// connPool2 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
+	// connPool3 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
+
+	// job1, err := connPool1.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job1)
+	// job2, err := connPool1.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job2)
+	// job3, err := connPool2.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job3)
+	// // job4, err = connPool2.ConsumeMessage("default2", time.Millisecond)
+	// // fmt.Println(job4)
+	// job5, err := connPool3.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job5)
+	// // job6, err = connPool2.ConsumeMessage("default2", time.Millisecond)
+	// // fmt.Println(job6)
+	// job6, err := connPool1.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job6)
+
+	// job7, err := connPool2.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job7)
+
+	// job8, err := connPool2.ConsumeMessage("default2", time.Millisecond)
+	// fmt.Println(job8)
+
+	// fmt.Println(err)
+
+	// panic("adfasdf")
+
 	grmon.Start()
 
 	putRandomJobs("localhost:11300")
@@ -68,7 +98,7 @@ func main() {
 	connPool := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
 	statAgent := stats.NewStatisticAgent(connPool)
 	scheduler := schedule.NewLotteryScheduler(statAgent, &(conf.Brokers[0]))
-	dpatcher := dispatcher.NewDispatcher(connPool, scheduler, log, conf.Brokers[0].Concurrent, 3*time.Second)
+	dpatcher := dispatcher.NewDispatcher(connPool, scheduler, log, int32(conf.Brokers[0].Concurrent), time.Millisecond)
 
 	wg.Add(2)
 	scheduler.Schedule(done, &wg)
@@ -113,10 +143,10 @@ func putRandomJobs(address string) {
 	tube2 := &beanstalk.Tube{Conn: conn, Name: "default2"}
 	tube3 := &beanstalk.Tube{Conn: conn, Name: "default3"}
 
-	for i := 0; i < 10; i++ {
-		_, err = tube1.Put([]byte("default1-"+gofakeit.JobTitle()), 1, 0, time.Minute)
-		_, err = tube2.Put([]byte("default2-"+gofakeit.HackerPhrase()), 1, 0, time.Minute)
-		_, err = tube3.Put([]byte("default3-"+gofakeit.HipsterWord()), 1, 0, time.Minute)
+	for i := 0; i < 1; i++ {
+		_, err = tube1.Put([]byte("default1-"+gofakeit.JobTitle()), 1, 0, 60*time.Second)
+		_, err = tube2.Put([]byte("default2-"+gofakeit.HackerPhrase()), 1, 0, 60*time.Second)
+		_, err = tube3.Put([]byte("default3-"+gofakeit.HipsterWord()), 1, 0, 60*time.Second)
 
 		if err != nil {
 			panic(err)

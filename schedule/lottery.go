@@ -112,7 +112,7 @@ func (lt *Lottery) assignTickets(stats *stats.ServerStatistic) {
 
 	lt.tickets = tickets
 
-	dumpStats(stats, tickets)
+	//dumpStats(stats, tickets)
 }
 
 func (lt *Lottery) getQueuePriority(queueName string) uint64 {

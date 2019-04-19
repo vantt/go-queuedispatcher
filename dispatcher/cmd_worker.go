@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -10,9 +11,6 @@ import (
 )
 
 const (
-	// Shell will have the command line passed to its `-c` option.
-	Shell = "/bin/bash"
-
 	// ttrMargin compensates for beanstalkd's integer precision.
 	// e.g. reserving a TTR=1 job will show time-left=0.
 	// We need to set our SIGTERM timer to time-left + ttrMargin.
@@ -35,7 +33,11 @@ func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.W
 			tickerMonitor.Stop()
 		}()
 
-		result := &TaskResult{ID: req.ID, Job: job}
+		result := &TaskResult{
+			ID:         job.ID,
+			Job:        job,
+			isTimedOut: false,
+		}
 
 		opt := cmd.Options{
 			Stdin:     true,
@@ -51,35 +53,37 @@ func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.W
 		process.WriteStdin(job.Payload.([]byte))
 		process.CloseStdin()
 
-		// waiting for Comand to process
-	waitLoop:
+		// waiting for Command to finish
 		for {
 			select {
 			// process time out
+			// this will
 			case <-tickerTimeOut.C:
+				fmt.Println("TimeOut ", job.ID)
 				process.Stop()
 				result.isTimedOut = true
 
-				break waitLoop // ?? remove this
+				// please dont break here,
+				// let see::  status := <-statChan:
 
 			case <-tickerMonitor.C:
 				// pool request to cancel
 				if wu.IsCancelled() {
+					fmt.Println("Pool cancel ", job.ID)
 					process.Stop()
 					result.isTimedOut = true
-
-					break waitLoop // ?? remove this
 				}
 
-			case status := <-statChan:
-				//fmt.Println("Get Status")
-				//spew.Dump(status)
+				// please dont break here,
+				// let see:: case status := <-statChan:
 
+			// this case will always happen for:
+			// command finished, or fail, or cancel or timeout
+			case status := <-statChan:
 				result.Error = status.Error
 				result.ExitStatus = status.Exit
 				result.isFail = (!status.Complete || status.Error != nil || status.Exit > 0)
 				result.isExecuted = (status.Complete && status.Error == nil)
-				result.isTimedOut = false
 				result.Body = status.Stdout
 				result.ErrorMsg = strings.Join(status.Stderr[:], "\n")
 
@@ -87,13 +91,11 @@ func NewCmdWorker(request interface{}, cmdName string, cmdArgs ...string) pool.W
 					result.ErrorMsg += "\n--------\n" + result.Error.Error()
 				}
 
-				break waitLoop
+				result.Runtime = time.Since(start).Seconds()
+
+				return result, nil
 			}
 		}
-
-		result.Runtime = time.Since(start).Seconds()
-
-		return result, nil
 	}
 }
 

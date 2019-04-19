@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kr/beanstalk"
+	"github.com/beanstalkd/go-beanstalk"
 )
 
 // BeanstalkdConnectionPool ...
@@ -110,11 +110,11 @@ func (bs *BeanstalkdConnectionPool) DeleteMessage(queueName string, job *Job) er
 func (bs *BeanstalkdConnectionPool) ReturnMessage(queueName string, job *Job, delay time.Duration) error {
 	pri, err := bs.uint64JobStat(queueName, job, "pri")
 
-	if err != nil {
-		return err
+	if err == nil {
+		return bs.GetQueue(queueName).Conn.Release(job.ID, uint32(pri), delay)
 	}
 
-	return bs.GetQueue(queueName).Conn.Release(job.ID, uint32(pri), delay)
+	return err
 }
 
 // GiveupMessage ...
@@ -157,10 +157,10 @@ func (bs *BeanstalkdConnectionPool) GetQueue(queueName string) *beanstalk.TubeSe
 
 	conn := bs.connect()
 
-	queue := beanstalk.NewTubeSet(conn, queueName)
-	bs.Queues[queueName] = queue
+	ts := beanstalk.NewTubeSet(conn, queueName)
+	bs.Queues[queueName] = ts
 
-	return queue
+	return ts
 }
 
 func (bs *BeanstalkdConnectionPool) getGlobalConnect() *beanstalk.Conn {

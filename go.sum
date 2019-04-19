@@ -5,6 +5,8 @@ github.com/bcicen/grmon v0.0.0-20180322004815-9e5e49d99f7c h1:JRvjo0TzkNJCSOa7EW
 github.com/bcicen/grmon v0.0.0-20180322004815-9e5e49d99f7c/go.mod h1:KEaJdcTbyvaT6Oyx9bbHwMVXNy9MTe7loXHNvaS+4Rg=
 github.com/bcicen/termui v0.0.0-20180326052246-4eb80249d3f5 h1:2pI3ZsoefWIi++8EqmANoC7Px/v2lRwnleVUcCuFgLg=
 github.com/bcicen/termui v0.0.0-20180326052246-4eb80249d3f5/go.mod h1:yIA9ITWZD1p4/DvCQ44xvhyVb9XEUlVnY1rzGSHwbiM=
+github.com/beanstalkd/go-beanstalk v0.0.0-20190227004814-7a112881e6c4 h1:wkzbyemaVm0X4SCRmuHx4GVXXggilJNU7WZ+lN6qrMs=
+github.com/beanstalkd/go-beanstalk v0.0.0-20190227004814-7a112881e6c4/go.mod h1:Q3f6RCbUHp8RHSfBiPUZBojK76rir8Rl+KINuz2/sYs=
 github.com/brianvoe/gofakeit v3.17.0+incompatible h1:C1+30+c0GtjgGDtRC+iePZeP1WMiwsWCELNJhmc7aIc=
 github.com/brianvoe/gofakeit v3.17.0+incompatible/go.mod h1:kfwdRA90vvNhPutZWfH7WPaDzUjz+CZFqG+rPkOjGOc=
 github.com/coreos/etcd v3.3.10+incompatible/go.mod h1:uF7uidLiAD3TWHmW31ZFd/JWoc32PjwdhPthX9715RE=
@@ -19,6 +21,7 @@ github.com/go-test/deep v1.0.1 h1:UQhStjbkDClarlmv0am7OXXO4/GaPdCGiUiMTvi28sg=
 github.com/go-test/deep v1.0.1/go.mod h1:wGDj63lr65AM2AQyKZd/NYHGb0R+1RLqB8NKt3aSFNA=
 github.com/hashicorp/hcl v1.0.0 h1:0Anlzjpi4vEasTeNFn2mLJgTSwt0+6sfsiTG8qcWGx4=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=
+github.com/konsorten/go-windows-terminal-sequences v1.0.1 h1:mweAR1A6xJ3oS2pRaGiHgQ4OO8tzTaLawm8vnODuwDk=
 github.com/konsorten/go-windows-terminal-sequences v1.0.1/go.mod h1:T0+1ngSBFLxvqU3pZ+m/2kptfBszLMUkC4ZK/EgS/cQ=
 github.com/kr/beanstalk v0.0.0-20180818045031-cae1762e4858 h1:kkNVQqyYyI0SsW9sOUEAKiLzoJGzW1ZVoYQCUmrAowE=
 github.com/kr/beanstalk v0.0.0-20180818045031-cae1762e4858/go.mod h1:S640fId9Ag4k2hh6Hwwj62pMSZqfMtg/kfKPeAOhET8=
