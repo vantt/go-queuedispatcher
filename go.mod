@@ -10,7 +10,7 @@ require (
 	github.com/go-akka/configuration v0.0.0-20190109144621-439b15a79294 // indirect
 	github.com/gogap/config v0.0.0-20180418140818-a1522129698c // indirect
 	github.com/gogap/logrus_mate v1.1.1-0.20181221030054-ceff7932618e // indirect
-	github.com/heptiolabs/healthcheck v0.0.0-20180807145615-6ff867650f40 // indirect
+	github.com/heptiolabs/healthcheck v0.0.0-20180807145615-6ff867650f40
 	github.com/kr/beanstalk v0.0.0-20180818045031-cae1762e4858
 	github.com/mattn/go-runewidth v0.0.4 // indirect
 	github.com/oklog/run v1.0.0 // indirect

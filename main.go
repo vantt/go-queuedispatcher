@@ -7,7 +7,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
-//    "net/http"
+    "net/http"
 	"context"
 
 	"github.com/bcicen/grmon/agent"
@@ -20,13 +20,14 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/coreos/go-systemd/daemon"
-//	"github.com/heptiolabs/healthcheck"
-	//"github.com/oklog/run"
+	"github.com/heptiolabs/healthcheck"
 )
 
 var (
 	conf *config.Configuration
 	logger  *zap.Logger // Create a new instance of the logger. You can have any number of instances.
+	httpServer *http.Server
+	health healthcheck.Handler
 )
 
 func init() {
@@ -78,38 +79,45 @@ func init() {
 	
 }
 
-// func setupHealthCheck() healthcheck.Handler {
-// 	health := healthcheck.NewHandler()
+func setupHealthCheck() {
+	health = healthcheck.NewHandler()
 
-// 	// Our app is not happy if we've got more than 100 goroutines running.
-// 	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(100))
+	// Our app is not happy if we've got more than 100 goroutines running.
+	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(100))
 
-// 	health.AddReadinessCheck(
-// 		"upstream-dep-tcp",
-// 		healthcheck.Async(TCPDialCheck(upstreamAddr, 50*time.Millisecond), 10*time.Second))
+	// health.AddReadinessCheck(
+	// 	"upstream-dep-tcp",
+	// 	healthcheck.Async(TCPDialCheck(upstreamAddr, 50*time.Millisecond), 10*time.Second))
 
-// 	go http.ListenAndServe("0.0.0.0:8086", health)
+	httpServer = &http.Server{Addr: "0.0.0.0:8086", Handler: health}
+	go httpServer.ListenAndServe()
+}
 
-// 	return health
-// }
+func setupSystemdNotify(ctx context.Context) {
 
-// func setupSystemdListener(done <-chan struct{}) {
-// 	for {
-// 		select {
-// 			case <-done:
-// 				return
+	interval, err := daemon.SdWatchdogEnabled(false)
 
-// 			default:
-// 				_, err := http.Get("http://127.0.0.1:8081/live")
+    if err != nil || interval == 0 {
+        return
+	}
+	
 
-// 				if err == nil {
-// 					daemon.SdNotify(false, "WATCHDOG=1")
-// 				}
+	for {
+		select {
+			case <-ctx.Done():
+				return
 
-// 				time.Sleep(interval / 3)
-// 		}
-// 	}
-// }
+			default:
+				response, err := http.Get("http://127.0.0.1:8086/live")
+
+				if err == nil && response.StatusCode == 200 {
+					daemon.SdNotify(false, "WATCHDOG=1")
+				}
+
+				time.Sleep(interval / 3)
+		}
+	}
+}
 
 func main() {
 	grmon.Start()
@@ -124,11 +132,21 @@ func main() {
 		cancelFunc()
 		wg.Wait()
 
+		// shutdown health server
+		if httpServer != nil {
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+			httpServer.Shutdown(ctx2)
+			httpServer = nil			
+			cancel2()
+		 }
+
 		logger.Info("Bye bye.")
 		logger.Sync()
 	}()
 
-	logger.Info("Setting up")
+	logger.Info("GoDispatcher setting up ... ")
+
+	setupHealthCheck()
 
 	for _, brokerConfig := range conf.Brokers {
 
@@ -138,7 +156,7 @@ func main() {
 		broker.Start(ctx, &wg)		
 	}
 
-	logger.Info("Service started")
+	logger.Info("GoDispatcher started")
 	daemon.SdNotify(false, "READY=1")
 
 	<-quit
@@ -171,8 +189,6 @@ func signalStop(c chan<- os.Signal) {
 	signal.Stop(c)
 }
 
-// https://medium.com/@j.d.livni/write-a-go-worker-pool-in-15-minutes-c9b42f640923
-
 func putRandomJobs(address string) {
 	conn, err := beanstalk.Dial("tcp", address)
 
@@ -190,12 +206,3 @@ func putRandomJobs(address string) {
 		}
 	}
 }
-
-
-// for {
-//     _, err := http.Get("http://127.0.0.1:8081") // ❸
-//     if err == nil {
-//         daemon.SdNotify(false, "WATCHDOG=1")
-//     }
-//     time.Sleep(interval / 3)
-// }
