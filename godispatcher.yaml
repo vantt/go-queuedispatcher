@@ -1,0 +1,21 @@
+brokers:
+  - scheduler: lottery
+    host: "localhost:11300"
+    workertype: cmd
+    workerendpoint: 
+      - "/bin/bash"
+      - "-c"
+      - "cat "
+    concurrent: 20
+    queues:    
+      - priority: 300
+        queuenames: 
+          - "default1"          
+      - priority: 100
+        queuenames: 
+          - "default2"          
+          - "default3"
+      - priority: 50
+        queuenames:           
+          - "others"    
+                       

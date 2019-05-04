@@ -1,12 +1,13 @@
 package dispatcher
 
 import (
+	"go.uber.org/zap"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"context"
 
-	log "github.com/sirupsen/logrus"
 	"github.com/vantt/go-queuedispatcher/queue"
 	"github.com/vantt/go-queuedispatcher/schedule"
 	"gopkg.in/go-playground/pool.v3"
@@ -32,11 +33,11 @@ type Dispatcher struct {
 	processingJobs int32
 	p              pool.Pool
 	timeout        time.Duration
-	log            *log.Logger
+	log            *zap.Logger
 }
 
 // NewDispatcher ...
-func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, log *log.Logger, concurrent int32, timeout time.Duration) *Dispatcher {
+func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceScheduler, log *zap.Logger, concurrent int32, timeout time.Duration) *Dispatcher {
 	return &Dispatcher{
 		queues:         qc,
 		scheduler:      sc,
@@ -48,9 +49,9 @@ func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceS
 }
 
 // Start ...
-func (tc *Dispatcher) Start(processFn processFunction, done <-chan struct{}, wg *sync.WaitGroup) {
+func (tc *Dispatcher) Start(ctx context.Context, wg *sync.WaitGroup, processFn processFunction) {
 	go func() {
-		var wg2 sync.WaitGroup
+		var wgChild sync.WaitGroup
 
 		// create a Worker Pool
 		tc.p = pool.NewLimited(uint(tc.concurrent))
@@ -58,47 +59,59 @@ func (tc *Dispatcher) Start(processFn processFunction, done <-chan struct{}, wg 
 		ticker := time.NewTicker(1 * time.Millisecond)
 		resultChan := make(chan pool.WorkUnit, tc.concurrent)
 
-		defer func() {
-			ticker.Stop()
-			wg2.Wait()
-			tc.p.Close()
-			close(resultChan)
-			wg.Done()
-
-			tc.log.Info("QUIT Dispatcher.")
-		}()
-
+		// this is a Channel Merge pattern
 		// Start an send goroutine for each input channel in cs.
 		// send copies values from c to resultChan until c is closed, then calls wg.Done.
-		mergeResult := func(c <-chan pool.WorkUnit) {
-			defer wg2.Done()
+		mergeResult := func(c <-chan pool.WorkUnit, wg *sync.WaitGroup) {
+			defer wg.Done()
 
 			for r := range c {
 				resultChan <- r
 			}
 		}
 
+		defer func() {
+			// stop so we dont submit new job-batch
+			ticker.Stop()
+
+			// wait for all submitted jobs finished
+			wgChild.Wait()
+
+			// close the worker pool
+			tc.p.Close()
+
+			// now close the resultChan
+			close(resultChan)
+
+			// ok I am done
+			wg.Done()
+
+			tc.log.Info("Dispatcher QUIT.")
+		}()
+
+		
+
 		for {
 			select {
-			case <-done:
+			case <-ctx.Done():	
+				// receive cancel signal from the context
 				return
-
-			case <-ticker.C:
-				// sumbit new batch
-				if batch1 := tc.submitBatch(processFn); batch1 != nil {
-					wg2.Add(1)
-					go mergeResult(batch1.Results())
+				
+			case _, ok := <-ticker.C:
+				if ok {
+					// sumbit new batch
+					if batch := tc.submitBatch(processFn); batch != nil {
+						wgChild.Add(1)
+						go mergeResult(batch.Results(), &wgChild)
+					}
 				}
 
-			case result := <-resultChan:
-				wg2.Add(1)
-				go tc.handleBatchResult(result, &wg2)
-
-				// sumbit new batch
-				// if batch2 := tc.submitBatch(processFn); batch2 != nil {
-				// 	wg2.Add(1)
-				// 	go mergeResult(batch2.Results())
-				// }
+			case result, ok := <-resultChan:
+				if ok { 
+					// handle result
+					wgChild.Add(1)
+					go tc.handleBatchResult(result, &wgChild)
+				}
 			}
 		}
 	}()
@@ -126,16 +139,16 @@ func (tc *Dispatcher) submitBatch(processFn processFunction) pool.Batch {
 					err := tc.queues.GiveupMessage(job.QueueName, job)
 
 					if err != nil {
-						tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Error("Give up job Fail")
+						tc.log.With(zap.String("queue", job.QueueName), zap.Uint64("job_id", job.ID)).Error("Give up job Fail")
 					} else {
-						tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Give up job")
+						tc.log.With(zap.String("queue", job.QueueName), zap.Uint64("job_id", job.ID)).Info("Give up job")
 					}
 				} else {
 
 					// otherwise put Job into the Channel
 					numWorks++
 					atomic.AddInt32(&(tc.processingJobs), 1)
-					tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Process job")
+					tc.log.With(zap.String("queue", job.QueueName), zap.Uint64("job_id", job.ID)).Info("Process job")
 					batch.Queue(processFn(&TaskRequest{Job: job}))
 				}
 			} else if tries++; tries > tc.concurrent {
@@ -165,7 +178,12 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 	}()
 
 	job := result.Job
-	logger := tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID})
+	
+	logger := tc.log.With(
+		zap.String("queue", job.QueueName),
+		zap.Uint64("job_id", job.ID),
+	)
+
 	logger.Info("Handle job result")
 
 	tc.scheduler.UpdateJobCost(job.QueueName, result.Runtime)
@@ -188,7 +206,7 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 			logger.Info("Delete job")
 			logger.Info(strings.Join(result.Body, "..."))
 		} else {
-			logger.WithFields(log.Fields{"error": err.Error}).Error("Deleting job FAIL")
+			logger.With(zap.String("error", err.Error())).Error("Deleting job FAIL")			
 		}
 
 	default:
@@ -202,12 +220,12 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 		// See: http://play.golang.org/p/I15lUWoabI
 		delay := time.Duration(r*r*r*r) * time.Second
 
-		logger.WithFields(log.Fields{"error": result.ErrorMsg}).Error("Job execution FAIL")
+		logger.With(zap.String("error", result.ErrorMsg)).Error("Job execution FAIL")
 
 		err = tc.queues.ReturnMessage(job.QueueName, job, delay)
 
 		if err != nil {
-			logger.WithFields(log.Fields{"error": err.Error()}).Error("Return job Fail")
+			logger.With(zap.String("error", result.ErrorMsg)).Error("Return job Fail")
 		} else {
 			logger.Info("Return job")
 		}
@@ -219,7 +237,7 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 func (tc *Dispatcher) getNextJob() *queue.Job {
 	if queueName, found := tc.scheduler.GetNextQueue(); found {
 		if job, err := tc.queues.ConsumeMessage(queueName, tc.timeout); err == nil && job != nil {
-			tc.log.WithFields(log.Fields{"queue": job.QueueName, "job_id": job.ID}).Info("Reserve job")
+			tc.log.With(zap.String("queue", job.QueueName), zap.Uint64("job_id", job.ID)).Info("Reserve job")
 			return job
 		}
 	}
