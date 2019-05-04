@@ -1,15 +1,15 @@
 package schedule
 
 import (
-	"fmt"
 	"math/rand"
 	"os"
 	"strconv"
 	"sync"
-
+	"context"
 	"github.com/olekukonko/tablewriter"
 	"github.com/vantt/go-queuedispatcher/config"
 	"github.com/vantt/go-queuedispatcher/stats"
+	"go.uber.org/zap"
 )
 
 // Lottery ...
@@ -20,15 +20,17 @@ type Lottery struct {
 	priority     map[string]uint64
 	totalTickets uint64
 	sync.RWMutex
+	logger *zap.Logger
 }
 
 // NewLotteryScheduler ...
-func NewLotteryScheduler(sa *stats.StatisticAgent, c *config.BrokerConfig) *Lottery {
+func NewLotteryScheduler(c *config.BrokerConfig, sa *stats.StatisticAgent, logger *zap.Logger ) *Lottery {
 	return &Lottery{
 		statAgent:    sa,
 		config:       c,
 		priority:     make(map[string]uint64),
 		totalTickets: 0,
+		logger: logger,
 	}
 }
 
@@ -57,24 +59,29 @@ func (lt *Lottery) GetNextQueue() (queueName string, found bool) {
 	return
 }
 
-// Schedule do re-assign the tickets everytime that Statistic changed
-func (lt *Lottery) Schedule(done <-chan struct{}, wg *sync.WaitGroup) {
-	var wg2 sync.WaitGroup
-	wg2.Add(1)
-	chanUpdate := lt.statAgent.StartAgent(done, &wg2)
+// Start do re-assign the tickets everytime that Statistic changed
+func (lt *Lottery) Start(ctx context.Context, wg *sync.WaitGroup) {
+
+	chanUpdate := lt.statAgent.GetUpdateChan()
 
 	go func() {
 		defer func() {
-			wg2.Wait()
 			wg.Done()
-			fmt.Println("QUIT Scheduler")
+			lt.logger.Info("Lottery Scheduler QUIT")
 		}()
 
 		for {
 			select {
-			case stats := <-chanUpdate:
+			case stats, ok := <-chanUpdate:
+
+				// closed channel
+				if ok == false {
+					return	
+				}
+
 				lt.assignTickets(stats)
-			case <-done:
+				
+			case <-ctx.Done():				
 				return
 			}
 		}

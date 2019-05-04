@@ -1,108 +1,145 @@
 package main
 
-import (
-	"fmt"
+import (	
 	"math/rand"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
 	"time"
+//    "net/http"
+	"context"
 
 	"github.com/bcicen/grmon/agent"
 	"github.com/brianvoe/gofakeit"
+
 	"github.com/kr/beanstalk"
-	"github.com/sirupsen/logrus"
 	"github.com/vantt/go-queuedispatcher/config"
-	"github.com/vantt/go-queuedispatcher/dispatcher"
-	"github.com/vantt/go-queuedispatcher/queue"
-	"github.com/vantt/go-queuedispatcher/schedule"
-	"github.com/vantt/go-queuedispatcher/stats"
-	"gopkg.in/go-playground/pool.v3"
+	"github.com/vantt/go-queuedispatcher/dispatcher"	
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
+	"github.com/coreos/go-systemd/daemon"
+//	"github.com/heptiolabs/healthcheck"
+	//"github.com/oklog/run"
 )
 
 var (
 	conf *config.Configuration
-	log  = logrus.New() // Create a new instance of the logger. You can have any number of instances.
+	logger  *zap.Logger // Create a new instance of the logger. You can have any number of instances.
 )
-
-func init() {
-	log.Out = os.Stdout
-
-	// Production
-	// log.SetFormatter(&logrus.JSONFormatter{})
-
-	// DEV Environment
-	log.SetFormatter(&logrus.TextFormatter{})
-}
 
 func init() {
 	// init random seed
 	rand.Seed(time.Now().UTC().UnixNano())
 	conf = config.ParseConfig()
-
 }
 
+func init() {
+
+	// First, define our level-handling logic.
+	highPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl >= zapcore.ErrorLevel
+	})
+
+	lowPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
+		return lvl < zapcore.ErrorLevel
+	})
+
+
+	jsonEncoder := zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig())
+	consoleEncoder := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
+
+
+	// High-priority output should also go to standard error, and low-priority
+	// output should also go to standard out.
+	consoleDebuggingOutput := zapcore.Lock(os.Stdout)
+	consoleErrorsOutput := zapcore.Lock(os.Stderr)
+
+
+	// lumberjack.Logger is already safe for concurrent use, so we don't need to lock it.
+	fileOutput := zapcore.AddSync(&lumberjack.Logger{
+		Filename:   "./dispatcher.log",
+		MaxSize:    100, // megabytes
+		MaxBackups: 3,
+		MaxAge:     28, // days
+	})
+
+	// Join the outputs, encoders, and level-handling functions into
+	// zapcore.Cores, then tee the four cores together.
+	core := zapcore.NewTee(    
+		zapcore.NewCore(jsonEncoder, fileOutput, zap.InfoLevel),
+		zapcore.NewCore(consoleEncoder, consoleErrorsOutput, highPriority),
+		zapcore.NewCore(consoleEncoder, consoleDebuggingOutput, lowPriority),
+	)
+
+	// From a zapcore.Core, it's easy to construct a Logger.
+	logger = zap.New(core)
+	
+}
+
+// func setupHealthCheck() healthcheck.Handler {
+// 	health := healthcheck.NewHandler()
+
+// 	// Our app is not happy if we've got more than 100 goroutines running.
+// 	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(100))
+
+// 	health.AddReadinessCheck(
+// 		"upstream-dep-tcp",
+// 		healthcheck.Async(TCPDialCheck(upstreamAddr, 50*time.Millisecond), 10*time.Second))
+
+// 	go http.ListenAndServe("0.0.0.0:8086", health)
+
+// 	return health
+// }
+
+// func setupSystemdListener(done <-chan struct{}) {
+// 	for {
+// 		select {
+// 			case <-done:
+// 				return
+
+// 			default:
+// 				_, err := http.Get("http://127.0.0.1:8081/live")
+
+// 				if err == nil {
+// 					daemon.SdNotify(false, "WATCHDOG=1")
+// 				}
+
+// 				time.Sleep(interval / 3)
+// 		}
+// 	}
+// }
+
 func main() {
-	//putRandomJobs("localhost:11300")
-	// connPool1 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
-	// connPool2 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
-	// connPool3 := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
-
-	// job1, err := connPool1.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job1)
-	// job2, err := connPool1.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job2)
-	// job3, err := connPool2.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job3)
-	// // job4, err = connPool2.ConsumeMessage("default2", time.Millisecond)
-	// // fmt.Println(job4)
-	// job5, err := connPool3.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job5)
-	// // job6, err = connPool2.ConsumeMessage("default2", time.Millisecond)
-	// // fmt.Println(job6)
-	// job6, err := connPool1.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job6)
-
-	// job7, err := connPool2.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job7)
-
-	// job8, err := connPool2.ConsumeMessage("default2", time.Millisecond)
-	// fmt.Println(job8)
-
-	// fmt.Println(err)
-
-	// panic("adfasdf")
-
 	grmon.Start()
-
-	//putRandomJobs("localhost:11300")
-	// panic("done")
+	putRandomJobs("localhost:11300")
 
 	var wg sync.WaitGroup
 
-	quit := signalsHandle()
-	done := make(chan struct{})
+	quit := signalsHandle()	
+	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	defer func() {
-		close(done)
+		cancelFunc()
 		wg.Wait()
-		fmt.Println("Bye bye.")
+
+		logger.Info("Bye bye.")
+		logger.Sync()
 	}()
 
-	processFn := func(request interface{}) pool.WorkFunc {
-		cmd := conf.Brokers[0].WorkerEndpoint
-		return dispatcher.NewCmdWorker(request, cmd[0], cmd[1:]...)
+	logger.Info("Setting up")
+
+	for _, brokerConfig := range conf.Brokers {
+
+		broker := dispatcher.NewBroker(brokerConfig, logger)
+		
+		wg.Add(1)
+		broker.Start(ctx, &wg)		
 	}
 
-	connPool := queue.NewBeanstalkdConnectionPool(conf.Brokers[0].Host)
-	statAgent := stats.NewStatisticAgent(connPool)
-	scheduler := schedule.NewLotteryScheduler(statAgent, &(conf.Brokers[0]))
-	dpatcher := dispatcher.NewDispatcher(connPool, scheduler, log, int32(conf.Brokers[0].Concurrent), time.Millisecond)
-
-	wg.Add(2)
-	scheduler.Schedule(done, &wg)
-	dpatcher.Start(processFn, done, &wg)
+	logger.Info("Service started")
+	daemon.SdNotify(false, "READY=1")
 
 	<-quit
 }
@@ -122,7 +159,7 @@ func signalsHandle() <-chan struct{} {
 
 		<-signals
 
-		fmt.Println("Receive interrup signal")
+		logger.Info("Receive interrupt signal")
 	}()
 
 	return quit
@@ -153,3 +190,12 @@ func putRandomJobs(address string) {
 		}
 	}
 }
+
+
+// for {
+//     _, err := http.Get("http://127.0.0.1:8081") // ❸
+//     if err == nil {
+//         daemon.SdNotify(false, "WATCHDOG=1")
+//     }
+//     time.Sleep(interval / 3)
+// }

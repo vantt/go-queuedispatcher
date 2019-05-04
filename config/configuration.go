@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/spf13/viper"
+	"github.com/spf13/pflag"
+	//"github.com/fsnotify/fsnotify"
 )
 
 // Configuration structure
@@ -59,15 +61,25 @@ func (bc *BrokerConfig) GetTopicPriority(topicName string) uint64 {
 // ParseConfig will find and Parse Config
 func ParseConfig() *Configuration {
 	cfg := viper.New()
-	cfg.SetConfigName("config")
-	cfg.AddConfigPath("/etc/go-queuedispatcher")
-	cfg.AddConfigPath("$HOME/.go-queuedispatcher")
-	cfg.AddConfigPath(".") // optionally look for config in the working directory
+	
+	if filepath := pflag.StringP("config", "c", "", "the path of the configuration file"); *filepath != "" {
+		cfg.AddConfigPath(*filepath)
+	} else {
+		cfg.SetConfigName("godispatcher")
+		cfg.AddConfigPath("/etc/go-queuedispatcher")
+		cfg.AddConfigPath("$HOME/.go-queuedispatcher")
+		cfg.AddConfigPath(".") // optionally look for config in the working directory
+	}
 
 	err := cfg.ReadInConfig() // Find and read the config file
 	if err != nil {           // Handle errors reading the config file
-		panic(fmt.Errorf("Fatal error config file: %s", err))
+		panic(fmt.Errorf("Config error: %s", err))
 	}
+
+	// cfg.WatchConfig()
+	// cfg.OnConfigChange(func(e fsnotify.Event) {
+	// 	fmt.Println("Config file changed:", e.Name)
+	// })
 
 	var config Configuration
 
