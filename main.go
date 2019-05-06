@@ -110,8 +110,11 @@ func setupHealthCheck(ctx context.Context, conf *config.Configuration) {
 
 	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(numGoroutines))
 
-	httpServer := &http.Server{Addr: conf.Viper.GetString("monitor.host"), Handler: health}
+	monitorHost := conf.Viper.GetString("monitor.host")
+	httpServer := &http.Server{Addr: monitorHost, Handler: health}
 	go httpServer.ListenAndServe()
+
+	logger.Info("HealthCheck HttpServer listening on " + monitorHost)
 
 	// wait to shutdown the http server
 	go func() {
@@ -121,12 +124,10 @@ func setupHealthCheck(ctx context.Context, conf *config.Configuration) {
 
 					// shutdown health server
 					if httpServer != nil {
-						ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
-						httpServer.Shutdown(ctx2)
+						httpServer.Shutdown(ctx)
 						httpServer = nil			
-						cancel2()
-
-						logger.Info("Http Health server QUIT.")
+						
+						logger.Info("Health Check HttpServer QUIT.")
 					}
 
 					return
@@ -228,7 +229,6 @@ func putRandomJobs(address string) {
 		}
 	}
 }
-
 
 func main() {
 	// grmon.Start()
