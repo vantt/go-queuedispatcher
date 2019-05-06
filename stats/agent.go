@@ -65,8 +65,7 @@ func (sc *StatisticAgent) Start(ctx context.Context, wg *sync.WaitGroup) <-chan 
 			case <-tick2.C:
 				sc.watchNewQueues()
 
-			case <-ctx.Done():
-				sc.logger.Info("Agent receive signal.")
+			case <-ctx.Done():				
 				return
 			}
 		}

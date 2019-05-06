@@ -7,7 +7,7 @@ require (
 	github.com/brianvoe/gofakeit v3.17.0+incompatible
 	github.com/coreos/go-systemd v0.0.0-20190321100706-95778dfbb74e
 	github.com/drdaeman/viper-mate v0.1.1 // indirect
-	github.com/go-akka/configuration v0.0.0-20190109144621-439b15a79294 // indirect
+	github.com/go-akka/configuration v0.0.0-20190109144621-439b15a79294
 	github.com/gogap/config v0.0.0-20180418140818-a1522129698c // indirect
 	github.com/gogap/logrus_mate v1.1.1-0.20181221030054-ceff7932618e // indirect
 	github.com/heptiolabs/healthcheck v0.0.0-20180807145615-6ff867650f40

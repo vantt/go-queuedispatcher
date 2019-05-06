@@ -10,7 +10,17 @@ import (
 
 // Configuration structure
 type Configuration struct {
+	Logging LoggerConfig `yaml:"logging"`
 	Brokers []BrokerConfig `yaml:"brokers"`
+	Viper *viper.Viper
+}
+
+// LoggerConfig ....
+type LoggerConfig struct {
+	Filename  string `yaml:"filename"`
+ 	MaxSize  int  `yaml:"MaxSize"` // megabytes
+	MaxBackups int `yaml:"MaxBackups"`
+	MaxAge int     `yaml:"MaxAge"` // days
 }
 
 // BrokerConfig ...
@@ -87,6 +97,8 @@ func ParseConfig() *Configuration {
 	if err != nil {
 		panic("Unable to unmarshal config")
 	}
+
+	config.Viper = cfg
 
 	return &config
 }

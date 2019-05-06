@@ -1,6 +1,7 @@
 package main
 
 import (	
+	"strconv"	
 	"math/rand"
 	"os"
 	"os/signal"
@@ -10,24 +11,22 @@ import (
     "net/http"
 	"context"
 
-	"github.com/bcicen/grmon/agent"
+	//"github.com/bcicen/grmon/agent"
 	"github.com/brianvoe/gofakeit"
-
-	"github.com/kr/beanstalk"
-	"github.com/vantt/go-queuedispatcher/config"
-	"github.com/vantt/go-queuedispatcher/dispatcher"	
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"github.com/coreos/go-systemd/daemon"
 	"github.com/heptiolabs/healthcheck"
+
+	"github.com/kr/beanstalk"
+	"github.com/vantt/go-queuedispatcher/config"
+	"github.com/vantt/go-queuedispatcher/dispatcher"	
 )
 
 var (
 	conf *config.Configuration
 	logger  *zap.Logger // Create a new instance of the logger. You can have any number of instances.
-	httpServer *http.Server
-	health healthcheck.Handler
 )
 
 func init() {
@@ -36,7 +35,7 @@ func init() {
 	conf = config.ParseConfig()
 }
 
-func init() {
+func setupLogger(conf config.LoggerConfig) {
 
 	// First, define our level-handling logic.
 	highPriority := zap.LevelEnablerFunc(func(lvl zapcore.Level) bool {
@@ -60,10 +59,10 @@ func init() {
 
 	// lumberjack.Logger is already safe for concurrent use, so we don't need to lock it.
 	fileOutput := zapcore.AddSync(&lumberjack.Logger{
-		Filename:   "./dispatcher.log",
-		MaxSize:    100, // megabytes
-		MaxBackups: 3,
-		MaxAge:     28, // days
+		Filename:   conf.Filename,
+		MaxSize:    conf.MaxSize, // megabytes
+		MaxBackups: conf.MaxBackups,
+		MaxAge:     conf.MaxAge, // days
 	})
 
 	// Join the outputs, encoders, and level-handling functions into
@@ -76,24 +75,67 @@ func init() {
 
 	// From a zapcore.Core, it's easy to construct a Logger.
 	logger = zap.New(core)
+}
+
+func setupHealthCheck(ctx context.Context, conf *config.Configuration) {
 	
-}
+	health := healthcheck.NewHandler()
 
-func setupHealthCheck() {
-	health = healthcheck.NewHandler()
+	// check connection to beanstalkd servers
+	for i, brokerConfig := range conf.Brokers {
+		health.AddReadinessCheck(
+			"upstream-beanstalkd-" + strconv.Itoa(i) + "-" + brokerConfig.Host,
+			healthcheck.Async(healthcheck.TCPDialCheck(brokerConfig.Host, 50*time.Millisecond), 
+			10*time.Second))
+	}
+	
 
-	// Our app is not happy if we've got more than 100 goroutines running.
-	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(100))
+	// Our app is not happy if we've got too much goroutine running
+	var numGoroutines int
 
-	// health.AddReadinessCheck(
-	// 	"upstream-dep-tcp",
-	// 	healthcheck.Async(TCPDialCheck(upstreamAddr, 50*time.Millisecond), 10*time.Second))
+	for i, brokerConfig := range conf.Brokers {
+		numGoroutines += int(brokerConfig.Concurrent) + 5
+		
+		health.AddLivenessCheck(
+			"upstream-beanstalkd-" + strconv.Itoa(i) + "-" + brokerConfig.Host,
+			healthcheck.Async(healthcheck.TCPDialCheck(brokerConfig.Host, 50*time.Millisecond), 
+			10*time.Second))
+	}
 
-	httpServer = &http.Server{Addr: "0.0.0.0:8086", Handler: health}
+	// core goroutine
+	numGoroutines += 10
+
+	// health check goroutine
+	numGoroutines += 10
+
+	health.AddLivenessCheck("goroutine-threshold", healthcheck.GoroutineCountCheck(numGoroutines))
+
+	httpServer := &http.Server{Addr: conf.Viper.GetString("monitor.host"), Handler: health}
 	go httpServer.ListenAndServe()
+
+	// wait to shutdown the http server
+	go func() {
+		for {
+			select {
+				case <-ctx.Done():
+
+					// shutdown health server
+					if httpServer != nil {
+						ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
+						httpServer.Shutdown(ctx2)
+						httpServer = nil			
+						cancel2()
+
+						logger.Info("Http Health server QUIT.")
+					}
+
+					return
+			}
+		}
+	}()
 }
 
-func setupSystemdNotify(ctx context.Context) {
+func setupSystemdNotify(ctx context.Context, healthEndPoint string) {
 
 	interval, err := daemon.SdWatchdogEnabled(false)
 
@@ -101,14 +143,28 @@ func setupSystemdNotify(ctx context.Context) {
         return
 	}
 	
+	// send READY signal to systemd
+	ready := false
 
+	for !ready {
+		response, err := http.Get(healthEndPoint + "/ready")
+
+		if err == nil && response.StatusCode == 200 {
+			daemon.SdNotify(false, "READY=1")
+			ready = true
+		}
+
+		time.Sleep(interval / 3)
+	}
+
+	// send LIVENESS signal to systemd
 	for {
 		select {
 			case <-ctx.Done():
 				return
 
 			default:
-				response, err := http.Get("http://127.0.0.1:8086/live")
+				response, err := http.Get(healthEndPoint + "/live")
 
 				if err == nil && response.StatusCode == 200 {
 					daemon.SdNotify(false, "WATCHDOG=1")
@@ -119,47 +175,13 @@ func setupSystemdNotify(ctx context.Context) {
 	}
 }
 
-func main() {
-	grmon.Start()
-	putRandomJobs("localhost:11300")
-
-	var wg sync.WaitGroup
-
-	quit := signalsHandle()	
-	ctx, cancelFunc := context.WithCancel(context.Background())
-
-	defer func() {
-		cancelFunc()
-		wg.Wait()
-
-		// shutdown health server
-		if httpServer != nil {
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-			httpServer.Shutdown(ctx2)
-			httpServer = nil			
-			cancel2()
-		 }
-
-		logger.Info("Bye bye.")
-		logger.Sync()
-	}()
-
-	logger.Info("GoDispatcher setting up ... ")
-
-	setupHealthCheck()
-
+func setupBrokers(ctx context.Context, wg *sync.WaitGroup, conf *config.Configuration) {
 	for _, brokerConfig := range conf.Brokers {
-
 		broker := dispatcher.NewBroker(brokerConfig, logger)
 		
 		wg.Add(1)
-		broker.Start(ctx, &wg)		
+		broker.Start(ctx, wg)		
 	}
-
-	logger.Info("GoDispatcher started")
-	daemon.SdNotify(false, "READY=1")
-
-	<-quit
 }
 
 func signalsHandle() <-chan struct{} {
@@ -205,4 +227,34 @@ func putRandomJobs(address string) {
 			panic(err)
 		}
 	}
+}
+
+
+func main() {
+	// grmon.Start()
+	// putRandomJobs("localhost:11300")
+
+	var wg sync.WaitGroup
+	quit := signalsHandle()	
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	defer func() {
+		cancelFunc()
+		wg.Wait()
+
+		logger.Info("Bye bye.")
+		logger.Sync()
+	}()
+
+	setupLogger(conf.Logging)
+
+	logger.Info("GoDispatcher setting up ... ")
+
+	setupHealthCheck(ctx, conf)
+	setupSystemdNotify(ctx, conf.Viper.GetString("monitor.host"))
+	setupBrokers(ctx, &wg, conf)
+	
+	logger.Info("GoDispatcher started")
+	
+	<-quit
 }
