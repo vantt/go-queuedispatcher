@@ -60,7 +60,7 @@ func (lt *Lottery) GetNextQueue() (queueName string, found bool) {
 }
 
 // Start do re-assign the tickets everytime that Statistic changed
-func (lt *Lottery) Start(ctx context.Context, wg *sync.WaitGroup) {
+func (lt *Lottery) Start(ctx context.Context, wg *sync.WaitGroup, readyChan chan<- string) {
 
 	chanUpdate := lt.statAgent.GetUpdateChan()
 
@@ -69,6 +69,8 @@ func (lt *Lottery) Start(ctx context.Context, wg *sync.WaitGroup) {
 			wg.Done()
 			lt.logger.Info("Lottery Scheduler QUIT")
 		}()
+
+		readyChan <- "Lottery Scheduler started"
 
 		for {
 			select {

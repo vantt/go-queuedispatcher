@@ -1,10 +1,9 @@
 package config
 
 import (
-	"fmt"
-
 	"github.com/spf13/viper"
 	"github.com/spf13/pflag"
+
 	//"github.com/fsnotify/fsnotify"
 )
 
@@ -52,8 +51,6 @@ func (bc *BrokerConfig) GetTopicPriority(topicName string) uint64 {
 		}
 	}
 
-	// spew.Dump(bc.queuesPriority)
-	// panic("out")
 	var (
 		priority uint64
 		found    bool
@@ -69,36 +66,34 @@ func (bc *BrokerConfig) GetTopicPriority(topicName string) uint64 {
 }
 
 // ParseConfig will find and Parse Config
-func ParseConfig() *Configuration {
+func ParseConfig() (config *Configuration, err error) {
 	cfg := viper.New()
-	
-	if filepath := pflag.StringP("config", "c", "", "the path of the configuration file"); *filepath != "" {
-		cfg.AddConfigPath(*filepath)
+
+	filepath := pflag.StringP("config", "c", "na", "the path of the configuration file")
+	pflag.Parse()
+
+	if (*filepath) != "na" {				
+		cfg.SetConfigFile(*filepath)
 	} else {
 		cfg.SetConfigName("godispatcher")
-		cfg.AddConfigPath("/etc/go-queuedispatcher")
-		cfg.AddConfigPath("$HOME/.go-queuedispatcher")
+		cfg.AddConfigPath("/etc/godispatcher")
+		cfg.AddConfigPath("$HOME/.godispatcher")
 		cfg.AddConfigPath(".") // optionally look for config in the working directory
 	}
-
-	err := cfg.ReadInConfig() // Find and read the config file
-	if err != nil {           // Handle errors reading the config file
-		panic(fmt.Errorf("Config error: %s", err))
-	}
+	
+	// Find and read the config file
+	if err = cfg.ReadInConfig(); err != nil {
+		return nil, err
+	} 
 
 	// cfg.WatchConfig()
 	// cfg.OnConfigChange(func(e fsnotify.Event) {
 	// 	fmt.Println("Config file changed:", e.Name)
 	// })
 
-	var config Configuration
-
-	err = cfg.Unmarshal(&config)
-	if err != nil {
-		panic("Unable to unmarshal config")
+	if err = cfg.Unmarshal(&config); err == nil {
+		config.Viper = cfg
 	}
 
-	config.Viper = cfg
-
-	return &config
+	return
 }

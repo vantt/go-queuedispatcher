@@ -26,6 +26,23 @@ func NewBeanstalkdConnectionPool(address string) *BeanstalkdConnectionPool {
 	return &BeanstalkdConnectionPool{address: address, Queues: make(map[string]*beanstalk.TubeSet)}
 }
 
+// CheckConnection ...
+func (bs *BeanstalkdConnectionPool) CheckConnection() bool {
+	
+	if conn, err := beanstalk.Dial("tcp", bs.address); err == nil && conn != nil {		
+		conn.Close()
+		return true
+	}
+   
+	return false
+	
+}
+
+// Address ... 
+func (bs *BeanstalkdConnectionPool) Address() string {
+	return bs.address
+}
+
 // ListQueues Returns a list of all queue names.
 func (bs *BeanstalkdConnectionPool) ListQueues() (queueNames []string, err error) {
 	queueNames, err = bs.getGlobalConnect().ListTubes()

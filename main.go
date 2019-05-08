@@ -10,7 +10,9 @@ import (
 	"time"
     "net/http"
 	"context"
-
+	"runtime"
+	
+	
 	//"github.com/bcicen/grmon/agent"
 	"github.com/brianvoe/gofakeit"
 	"go.uber.org/zap"
@@ -26,13 +28,13 @@ import (
 
 var (
 	conf *config.Configuration
-	logger  *zap.Logger // Create a new instance of the logger. You can have any number of instances.
+	logger  *zap.Logger 
+	err error
 )
 
 func init() {
 	// init random seed
-	rand.Seed(time.Now().UTC().UnixNano())
-	conf = config.ParseConfig()
+	rand.Seed(time.Now().UTC().UnixNano())	
 }
 
 func setupLogger(conf config.LoggerConfig) {
@@ -153,9 +155,10 @@ func setupSystemdNotify(ctx context.Context, healthEndPoint string) {
 		if err == nil && response.StatusCode == 200 {
 			daemon.SdNotify(false, "READY=1")
 			ready = true
-		}
-
-		time.Sleep(interval / 3)
+			logger.Info("GoDispatcher ready")
+		} else {
+			time.Sleep(interval / 3)
+		}	
 	}
 
 	// send LIVENESS signal to systemd
@@ -176,13 +179,19 @@ func setupSystemdNotify(ctx context.Context, healthEndPoint string) {
 	}
 }
 
-func setupBrokers(ctx context.Context, wg *sync.WaitGroup, conf *config.Configuration) {
+func setupBrokers(ctx context.Context, wg *sync.WaitGroup, conf *config.Configuration) error {
 	for _, brokerConfig := range conf.Brokers {
-		broker := dispatcher.NewBroker(brokerConfig, logger)
 		
 		wg.Add(1)
-		broker.Start(ctx, wg)		
+		
+		broker := dispatcher.NewBroker(brokerConfig, logger)
+
+		if err := broker.Start(ctx, wg); err != nil {
+			return err
+		}
 	}
+
+	return nil
 }
 
 func signalsHandle() <-chan struct{} {
@@ -234,27 +243,43 @@ func main() {
 	// grmon.Start()
 	// putRandomJobs("localhost:11300")
 
-	var wg sync.WaitGroup
-	quit := signalsHandle()	
+	if conf, err = config.ParseConfig(); err != nil {		
+		panic(err.Error())
+	}
+
+	var wg sync.WaitGroup	
+	
 	ctx, cancelFunc := context.WithCancel(context.Background())
 
 	defer func() {
-		cancelFunc()
-		wg.Wait()
+		if err != nil {			
+			logger.Error(err.Error())	
+		}
 
+		cancelFunc()		
+		wg.Wait()
+		
 		logger.Info("Bye bye.")
 		logger.Sync()
+
+		if err != nil {
+			os.Exit(1)
+		} else {
+			os.Exit(0)
+		}
 	}()
+
 
 	setupLogger(conf.Logging)
 
 	logger.Info("GoDispatcher setting up ... ")
+	
+	if err = setupBrokers(ctx, &wg, conf); err != nil {		
+		runtime.Goexit()
+	}	
 
-	setupHealthCheck(ctx, conf)
-	setupSystemdNotify(ctx, conf.Viper.GetString("monitor.host"))
-	setupBrokers(ctx, &wg, conf)
-	
-	logger.Info("GoDispatcher started")
-	
-	<-quit
+	//setupSystemdNotify(ctx, conf.Viper.GetString("monitor.host"))
+	setupHealthCheck(ctx, conf)	
+	quit := signalsHandle()	
+	<-quit 
 }

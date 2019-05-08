@@ -4,6 +4,7 @@ import (
 	"sync"
 	"context"
 	"time"
+	"errors"
 
 	"go.uber.org/zap"
 	"github.com/vantt/go-queuedispatcher/config"	
@@ -21,6 +22,7 @@ type Broker struct {
 	connPool queue.InterfaceQueueConnectionPool
 	scheduler schedule.InterfaceScheduler
 	dispatcher *Dispatcher
+	wgChild sync.WaitGroup
 }
 
 // NewBroker ...
@@ -29,61 +31,81 @@ func NewBroker(cnf config.BrokerConfig, logger *zap.Logger) *Broker{
 }
 
 // Start ...
-func (br *Broker) Start(ctx context.Context, wg *sync.WaitGroup) {
+func (br *Broker) Start(ctx context.Context, wg *sync.WaitGroup) error {
+	err := br.setup(ctx);
 
-	var wgChild sync.WaitGroup
+	if  err == nil {
+		// start broker
+		go func() {
+			defer func() {
+				br.wgChild.Wait()
+				wg.Done()
+				br.logger.Info("Broker QUIT")
+			}()
 
-	br.setup()
-
-	wgChild.Add(1)
-	br.statAgent.Start(ctx, &wgChild)
-
-	wgChild.Add(1)
-	br.scheduler.Start(ctx, &wgChild)
-
-	wgChild.Add(1)
-	br.dispatcher.Start(ctx, &wgChild, br.createWorkerFunc())
-
-	go func() {
-		defer func() {
-			wgChild.Wait()
-			wg.Done()
-			br.logger.Info("Broker QUIT")
+			for {
+				select {
+				case <-ctx.Done():				
+					return
+				}
+			}
 		}()
 
 		br.logger.Info("Broker started")
 
-		for {
-			select {
-			case <-ctx.Done():				
-				return
-			}
-		}
-	}()
-	
+	} else {
+		br.logger.Info("Broker setup fail")
+		wg.Done()	
+	}
+		
+	return err
 }
 
-func (br *Broker) setup()  {
+func (br *Broker) setup(ctx context.Context) error {
 	br.logger.Info("Broker setting up ....")
-
+	
 	connPool := queue.NewBeanstalkdConnectionPool(br.config.Host)
-
+	
+	if !connPool.CheckConnection() {
+		return errors.New("Could not connect to beanstalkd: " + br.config.Host)		
+	}
+	
 	statAgent := stats.NewStatisticAgent(connPool, br.logger)
 	if statAgent == nil {
-		br.logger.DPanic("Could not create Statistic Agent")
+		return errors.New("Could not create Statistic Agent")		
 	}
 
 	scheduler := br.createScheduler(statAgent)
 	if scheduler == nil {
-		br.logger.DPanic("Could not create Scheduler")
+		return errors.New("Could not create Scheduler")		
 	}
 
-	dpatcher  := NewDispatcher(connPool, scheduler, br.logger, int32(br.config.Concurrent), time.Millisecond)
+	dpatcher := NewDispatcher(connPool, scheduler, br.logger, int32(br.config.Concurrent), time.Millisecond)
 
 	br.connPool = connPool
 	br.statAgent = statAgent
 	br.scheduler = scheduler
 	br.dispatcher = dpatcher
+
+	childReady := make(chan string, 3)
+	
+	br.wgChild.Add(1)
+	br.statAgent.Start(ctx, &(br.wgChild), childReady)
+	
+	br.wgChild.Add(1)
+	br.scheduler.Start(ctx, &(br.wgChild), childReady)
+	
+	br.wgChild.Add(1)
+	br.dispatcher.Start(ctx, &(br.wgChild), br.createWorkerFunc(), childReady)
+	
+	// wait for sub-goroutine to ready
+	for i:=0; i < 3; i++  {
+		br.logger.Info(<-childReady)
+	}
+
+	close(childReady)
+
+	return nil
 }
 
 func (br *Broker) createWorkerFunc() processFunction {

@@ -1,9 +1,7 @@
 logging:
   path: ./
-
 monitor:  
   host: 127.0.0.1:8086
-
 brokers:
   - scheduler: lottery
     host: "localhost:11300"

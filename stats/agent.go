@@ -23,6 +23,7 @@ type StatisticAgent struct {
 	queueInfo queue.InterfaceQueueConnectionPool
 	logger    *zap.Logger
 	updateChan chan *ServerStatistic
+	aliveChan chan chan struct{}
 }
 
 // NewStatisticAgent ...
@@ -34,18 +35,23 @@ func NewStatisticAgent(qi queue.InterfaceQueueConnectionPool, logger *zap.Logger
 	}
 }
 
+// IsAlive ...
+func (sc *StatisticAgent) IsAlive() chan struct{} {	
+	returnChan := make(chan struct{})
+
+	go func() { sc.aliveChan <- returnChan }()
+
+	return returnChan
+}
+
 // Start statistic provide method to control CollectorAgent collect the statistics
 // data in a Goroutine.
-func (sc *StatisticAgent) Start(ctx context.Context, wg *sync.WaitGroup) <-chan *ServerStatistic {
-	sc.logger.Info("Statistic Agent setup...")
-
+func (sc *StatisticAgent) Start(ctx context.Context, wg *sync.WaitGroup, readyChan chan<- string) <-chan *ServerStatistic {	
 	tick1 := time.NewTicker(StatisticDelay)
 	tick2 := time.NewTicker(ListTubeDelay)
 	sc.updateChan = make(chan *ServerStatistic)
 
 	go func() {
-		sc.logger.Info("Statistic Agent started")
-		
 		defer func() {
 			tick1.Stop()
 			tick2.Stop()
@@ -55,6 +61,8 @@ func (sc *StatisticAgent) Start(ctx context.Context, wg *sync.WaitGroup) <-chan 
 			sc.logger.Info("Statistic Agent QUIT")
 		}()
 
+		readyChan <- "Statistic Agent started"
+
 		for {
 			select {
 			case <-tick1.C:
@@ -63,7 +71,7 @@ func (sc *StatisticAgent) Start(ctx context.Context, wg *sync.WaitGroup) <-chan 
 				}
 
 			case <-tick2.C:
-				sc.watchNewQueues()
+				sc.watchNewQueues()				
 
 			case <-ctx.Done():				
 				return

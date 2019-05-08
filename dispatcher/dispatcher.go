@@ -33,6 +33,7 @@ type Dispatcher struct {
 	processingJobs int32
 	p              pool.Pool
 	timeout        time.Duration
+	aliveChan chan chan struct{}
 	log            *zap.Logger
 }
 
@@ -48,8 +49,17 @@ func NewDispatcher(qc queue.InterfaceQueueConnectionPool, sc schedule.InterfaceS
 	}
 }
 
+// IsAlive ...
+func (tc *Dispatcher) IsAlive() chan struct{} {	
+	returnChan := make(chan struct{})
+
+	go func() { tc.aliveChan <- returnChan }()
+
+	return returnChan
+}
+
 // Start ...
-func (tc *Dispatcher) Start(ctx context.Context, wg *sync.WaitGroup, processFn processFunction) {
+func (tc *Dispatcher) Start(ctx context.Context, wg *sync.WaitGroup, processFn processFunction, readyChan chan<- string) {
 	go func() {
 		var wgChild sync.WaitGroup
 
@@ -89,10 +99,11 @@ func (tc *Dispatcher) Start(ctx context.Context, wg *sync.WaitGroup, processFn p
 			tc.log.Info("Dispatcher QUIT.")
 		}()
 
-		
+		readyChan <- "Dispatcher started."
 
 		for {
 			select {
+
 			case <-ctx.Done():	
 				// receive cancel signal from the context
 				return
