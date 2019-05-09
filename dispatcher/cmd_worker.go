@@ -14,7 +14,7 @@ const (
 	// ttrMargin compensates for beanstalkd's integer precision.
 	// e.g. reserving a TTR=1 job will show time-left=0.
 	// We need to set our SIGTERM timer to time-left + ttrMargin.
-	ttrMargin = 1 * time.Second
+	ttrMargin = 300 * time.Second
 )
 
 // NewCmdWorker ...

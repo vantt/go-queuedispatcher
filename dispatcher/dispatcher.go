@@ -215,7 +215,7 @@ func (tc *Dispatcher) handleTaskResult(result *TaskResult, taskErr error) (err e
 
 		if err == nil {
 			logger.Info("Delete job")
-			logger.Info(strings.Join(result.Body, "..."))
+			//logger.Info(strings.Join(result.Body, "..."))
 		} else {
 			logger.With(zap.String("error", err.Error())).Error("Deleting job FAIL")			
 		}
